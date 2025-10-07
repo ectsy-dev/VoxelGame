@@ -31,7 +31,7 @@ public class World : MonoBehaviour
 
         seedOffSet = worldSeed;
 
-        spawnPosition = new Vector3(((VoxelData.worldSizeInChunks * VoxelData.chunkWidth) / 2f), VoxelData.chunkHeight + 1, ((VoxelData.worldSizeInChunks * VoxelData.chunkWidth) / 2f));
+        spawnPosition = new Vector3(((VoxelData.worldSizeInChunks * VoxelData.chunkWidth) / 2f), biomes[0].terrainHeight - 13, ((VoxelData.worldSizeInChunks * VoxelData.chunkWidth) / 2f));
 
         GenerateWorld();
         playerLastChunkCoord = GetChunkCoordFromVector3(player.position);
@@ -139,9 +139,6 @@ public class World : MonoBehaviour
             return 1;
 
         int terrainHeight = Mathf.FloorToInt(biomes[0].terrainHeight * Noise.Get2DNoise(new Vector2(pos.x, pos.z), 500f, biomes[0].terrainScale, seedOffSet)) + biomes[0].solidGroundHeight;
-
-
-
         short voxelValue = 0;
 
         if (yPos == terrainHeight)

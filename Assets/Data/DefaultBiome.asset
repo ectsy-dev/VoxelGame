@@ -14,7 +14,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   biomeName: Default
   solidGroundHeight: 40
-  terrainHeight: 60
+  terrainHeight: 85
   terrainScale: 0.25
   nodes:
   - nodName: Air Pass 1
