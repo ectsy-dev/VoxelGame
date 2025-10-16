@@ -52,11 +52,13 @@ public class PlayerManager : MonoBehaviour
 
         var characterInput = new CharacterInput
         {
+
             Move = input.Move.ReadValue<Vector2>(),
             Rotation = playerCamera.transform.rotation
+
         };
 
-        playerController.UpdateInput(characterInput);
+        playerController.UpdateCharacter(characterInput);
 
     }
 

@@ -6,8 +6,6 @@ public class VoxelData
     public static readonly uint chunkWidth = 16;
     public static readonly uint chunkHeight = 128;
 
-    public static readonly int worldSeed;
-
     public static readonly uint worldSizeInChunks = 10;
     public static readonly uint worldSizeInVoxels = worldSizeInChunks * chunkWidth;
 
