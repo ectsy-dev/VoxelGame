@@ -17,9 +17,10 @@ public class PlayerController : MonoBehaviour
     [Header("Player Movement Variables")]
     [SerializeField] private float moveSpeed;
     [SerializeField] private float jumpForce;
+    [SerializeField] private float fallMultiplier = 1.8f;
     [SerializeField] private float playerWidth;
     [SerializeField] private float playerHeight;
-    public bool isGrounded;
+    private bool isGrounded;
 
     [Header("Player References")]
     [SerializeField] private Transform cameraTarget;
@@ -53,10 +54,16 @@ public class PlayerController : MonoBehaviour
     private void PlayerMovement(CharacterInput input)
     {
 
-        velocity -= Vector3.up * gravity * Time.deltaTime;
+        if (velocity.y < 0)
+            velocity -= Vector3.up * gravity * fallMultiplier * Time.deltaTime;
+        else
+            velocity -= Vector3.up * gravity * Time.deltaTime;
 
         if (input.Jump && isGrounded)
+        {
             velocity.y = jumpForce;
+            isGrounded = false;
+        }
 
         moveDirection = transform.forward * input.Move.y + transform.right * input.Move.x;
         moveDirection.Normalize();

@@ -55,7 +55,7 @@ public class PlayerManager : MonoBehaviour
 
             Move = input.Move.ReadValue<Vector2>(),
             Rotation = playerCamera.transform.rotation,
-            Jump = input.Jump.WasPressedThisFrame()
+            Jump = input.Jump.IsPressed()
 
         };
 
