@@ -130,9 +130,18 @@ public class World : MonoBehaviour
     public bool CheckForVoxel(float x, float y, float z)
     {
 
-        uint xCheck = (uint)Mathf.FloorToInt(x);
-        uint yCheck = (uint)Mathf.FloorToInt(y);
-        uint zCheck = (uint)Mathf.FloorToInt(z);
+        int xi = Mathf.FloorToInt(x);
+        int yi = Mathf.FloorToInt(y);
+        int zi = Mathf.FloorToInt(z);
+
+        if (xi < 0 || xi >= VoxelData.worldSizeInVoxels ||
+            yi < 0 || yi >= VoxelData.chunkHeight ||
+            zi < 0 || zi >= VoxelData.worldSizeInVoxels)
+            return true;
+
+        uint xCheck = (uint)xi;
+        uint yCheck = (uint)yi;
+        uint zCheck = (uint)zi;
 
         uint xChunk = xCheck / VoxelData.chunkWidth;
         uint zChunk = zCheck / VoxelData.chunkWidth;

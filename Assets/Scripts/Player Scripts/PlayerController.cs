@@ -7,6 +7,7 @@ public struct CharacterInput
 {
     public Vector2 Move;
     public Quaternion Rotation;
+    public bool Jump;
 
 }
 
@@ -53,13 +54,15 @@ public class PlayerController : MonoBehaviour
     {
 
         velocity -= Vector3.up * gravity * Time.deltaTime;
-        velocity = velocity.normalized;
+
+        if (input.Jump && isGrounded)
+            velocity.y = jumpForce;
 
         moveDirection = transform.forward * input.Move.y + transform.right * input.Move.x;
         moveDirection.Normalize();
 
         moveDirection *= moveSpeed * Time.deltaTime;
-        moveDirection += velocity;
+        moveDirection += velocity * Time.deltaTime;
 
         if((moveDirection.z > 0 && frontBlockCheck) || (moveDirection.z < 0 && backBlockCheck))
             moveDirection.z = 0;
