@@ -64,13 +64,13 @@ public class PlayerController : MonoBehaviour
         if((moveDirection.z > 0 && frontBlockCheck) || (moveDirection.z < 0 && backBlockCheck))
             moveDirection.z = 0;
 
-        if((moveDirection.z > 0 && (frontLeftBlockCheck || frontRightBlockCheck)) || (moveDirection.z < 0 && (backLeftBlockCheck || backRightBlockCheck)))
+        if((moveDirection.z > 0 && ((frontLeftBlockCheck && !leftBlockCheck) || (frontRightBlockCheck && !rightBlockCheck))) || (moveDirection.z < 0 && ((backLeftBlockCheck && !leftBlockCheck) || (backRightBlockCheck && !rightBlockCheck))))
             moveDirection.z = 0;
 
         if ((moveDirection.x > 0 && rightBlockCheck) || (moveDirection.x < 0 && leftBlockCheck))
             moveDirection.x = 0;
 
-        if ((moveDirection.x > 0 && (frontRightBlockCheck || backRightBlockCheck)) || (moveDirection.x < 0 && (frontLeftBlockCheck || backLeftBlockCheck)))
+        if ((moveDirection.x > 0 && ((frontRightBlockCheck && !frontBlockCheck) || (backRightBlockCheck && !backBlockCheck))) || (moveDirection.x < 0 && ((frontLeftBlockCheck && !frontBlockCheck) || (backLeftBlockCheck && !backBlockCheck))))
             moveDirection.x = 0;
 
         if (moveDirection.y < 0)
