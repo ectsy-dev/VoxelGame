@@ -37,9 +37,18 @@ public class World : MonoBehaviour
         // Bound the offset to a safe range for Perlin noise
         seedOffSet = ((seedOffSet % 50000) + 50000) % 50000;
 
-        spawnPosition = new Vector3(((VoxelData.worldSizeInChunks * VoxelData.chunkWidth) / 2f), biomes[0].terrainHeight - 13, ((VoxelData.worldSizeInChunks * VoxelData.chunkWidth) / 2f));
+        float spawnX = (VoxelData.worldSizeInChunks * VoxelData.chunkWidth) / 2f;
+        float spawnZ = (VoxelData.worldSizeInChunks * VoxelData.chunkWidth) / 2f;
+        int spawnY = Mathf.FloorToInt(biomes[0].terrainHeight * Noise.Get2DNoise(new Vector2(spawnX, spawnZ), 500f, biomes[0].terrainScale, seedOffSet)) + biomes[0].solidGroundHeight;
 
         GenerateWorld();
+
+        // Scan upward to find first air block above solid ground
+        while (spawnY < VoxelData.chunkHeight && CheckForVoxel(spawnX, spawnY, spawnZ))
+            spawnY++;
+
+        spawnPosition = new Vector3(spawnX, spawnY + 1, spawnZ);
+        player.position = spawnPosition;
         playerLastChunkCoord = GetChunkCoordFromVector3(player.position);
 
     }
@@ -71,8 +80,6 @@ public class World : MonoBehaviour
 
             }
         }
-
-        player.position = spawnPosition;
 
     }
 
