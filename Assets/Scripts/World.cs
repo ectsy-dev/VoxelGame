@@ -8,7 +8,7 @@ public class World : MonoBehaviour
     public Transform player;
     public Vector3 spawnPosition;
 
-    public int worldSeed;
+    public string worldSeed;
     public int seedOffSet;
 
     public BiomeAttributes[] biomes;
@@ -29,7 +29,13 @@ public class World : MonoBehaviour
             chunks[i] = new Chunk[VoxelData.worldSizeInChunks];
         }
 
-        seedOffSet = worldSeed;
+        if (int.TryParse(worldSeed, out int parsedSeed))
+            seedOffSet = parsedSeed;
+        else
+            seedOffSet = worldSeed.GetHashCode();
+
+        // Bound the offset to a safe range for Perlin noise
+        seedOffSet = ((seedOffSet % 50000) + 50000) % 50000;
 
         spawnPosition = new Vector3(((VoxelData.worldSizeInChunks * VoxelData.chunkWidth) / 2f), biomes[0].terrainHeight - 13, ((VoxelData.worldSizeInChunks * VoxelData.chunkWidth) / 2f));
 
@@ -161,7 +167,7 @@ public class World : MonoBehaviour
         if (!IsVoxelInWorld(pos))
             return 0;
 
-        if (yPos <= Random.Range(0, 4))
+        if (yPos <= GetBedrockHeight(pos))
             return 1;
 
         int terrainHeight = Mathf.FloorToInt(biomes[0].terrainHeight * Noise.Get2DNoise(new Vector2(pos.x, pos.z), 500f, biomes[0].terrainScale, seedOffSet)) + biomes[0].solidGroundHeight;
@@ -211,6 +217,12 @@ public class World : MonoBehaviour
             return false;
         else
             return true;
+    }
+
+    int GetBedrockHeight(Vector3 pos)
+    {
+        int hash = ((int)pos.x * 73856093) ^ ((int)pos.z * 19349663) ^ (seedOffSet * 83492791);
+        return ((hash & 0x7FFFFFFF) % 4);
     }
 
     bool IsVoxelInWorld(Vector3 pos)
