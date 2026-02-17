@@ -21,6 +21,8 @@ public class PlayerCamera : MonoBehaviour
         transform.position = target.position;
         transform.eulerAngles = eulerAngles = target.eulerAngles;
 
+        Camera.main.nearClipPlane = 0.01f;
+
     }
 
     public void UpdateRotation(CameraInput input)

@@ -17,7 +17,7 @@ public class PlayerController : MonoBehaviour
     [Header("Player Movement Variables")]
     [SerializeField] private float moveSpeed;
     [SerializeField] private float jumpForce;
-    [SerializeField] private float fallMultiplier = 1.8f;
+    [SerializeField] private float fallMultiplier = 2.0f;
     [SerializeField] private float playerWidth;
     [SerializeField] private float playerHeight;
     private bool isGrounded;
@@ -28,7 +28,7 @@ public class PlayerController : MonoBehaviour
 
     private Vector3 moveDirection;
     private Vector3 velocity;
-    private float gravity = 9.807f;
+    private float gravity = 32f;
 
     public void Initialize()
     {
@@ -61,8 +61,10 @@ public class PlayerController : MonoBehaviour
 
         if (input.Jump && isGrounded)
         {
+
             velocity.y = jumpForce;
             isGrounded = false;
+
         }
 
         moveDirection = transform.forward * input.Move.y + transform.right * input.Move.x;
@@ -122,10 +124,10 @@ public class PlayerController : MonoBehaviour
     private float checkUpSpeed(float upSpeed)
     {
 
-        if(overWorld.CheckForVoxel(transform.position.x - playerWidth, transform.position.y + playerHeight + upSpeed, transform.position.z - playerWidth) && (!leftBlockCheck && !backBlockCheck && !backLeftBlockCheck) ||
-            overWorld.CheckForVoxel(transform.position.x + playerWidth, transform.position.y + playerHeight + upSpeed, transform.position.z - playerWidth) && (!rightBlockCheck && !backBlockCheck && !backRightBlockCheck) ||
-            overWorld.CheckForVoxel(transform.position.x + playerWidth, transform.position.y + playerHeight + upSpeed, transform.position.z + playerWidth) && (!rightBlockCheck && !frontBlockCheck && !frontRightBlockCheck) ||
-            overWorld.CheckForVoxel(transform.position.x - playerWidth, transform.position.y + playerHeight + upSpeed, transform.position.z + playerWidth) && (!leftBlockCheck && !frontBlockCheck && !frontLeftBlockCheck))
+        if(overWorld.CheckForVoxel(transform.position.x - playerWidth, transform.position.y + playerHeight - 0.1f + upSpeed, transform.position.z - playerWidth) && (!leftBlockCheck && !backBlockCheck && !backLeftBlockCheck) ||
+            overWorld.CheckForVoxel(transform.position.x + playerWidth, transform.position.y + playerHeight - 0.1f + upSpeed, transform.position.z - playerWidth) && (!rightBlockCheck && !backBlockCheck && !backRightBlockCheck) ||
+            overWorld.CheckForVoxel(transform.position.x + playerWidth, transform.position.y + playerHeight - 0.1f + upSpeed, transform.position.z + playerWidth) && (!rightBlockCheck && !frontBlockCheck && !frontRightBlockCheck) ||
+            overWorld.CheckForVoxel(transform.position.x - playerWidth, transform.position.y + playerHeight - 0.1f + upSpeed, transform.position.z + playerWidth) && (!leftBlockCheck && !frontBlockCheck && !frontLeftBlockCheck))
         {
 
             velocity.y = 0;
@@ -148,7 +150,7 @@ public class PlayerController : MonoBehaviour
         {
 
             if (overWorld.CheckForVoxel(transform.position.x, transform.position.y - playerHeight, transform.position.z + playerWidth + 0.2f) ||
-                overWorld.CheckForVoxel(transform.position.x, transform.position.y + 1f, transform.position.z + playerWidth + 0.2f))
+                overWorld.CheckForVoxel(transform.position.x, transform.position.y + playerHeight - 0.1f, transform.position.z + playerWidth + 0.2f))
                 return true;
             else
                 return false;
@@ -164,7 +166,7 @@ public class PlayerController : MonoBehaviour
         {
 
             if (overWorld.CheckForVoxel(transform.position.x, transform.position.y - playerHeight, transform.position.z - playerWidth - 0.2f) ||
-                overWorld.CheckForVoxel(transform.position.x, transform.position.y + 1f, transform.position.z - playerWidth - 0.2f))
+                overWorld.CheckForVoxel(transform.position.x, transform.position.y + playerHeight - 0.1f, transform.position.z - playerWidth - 0.2f))
                 return true;
             else
                 return false;
@@ -180,7 +182,23 @@ public class PlayerController : MonoBehaviour
         {
 
             if (overWorld.CheckForVoxel(transform.position.x - playerWidth - 0.2f, transform.position.y - playerHeight, transform.position.z) ||
-                overWorld.CheckForVoxel(transform.position.x - playerWidth - 0.2f, transform.position.y + 1f, transform.position.z))
+                overWorld.CheckForVoxel(transform.position.x - playerWidth - 0.2f, transform.position.y + playerHeight - 0.1f, transform.position.z))
+                return true;
+            else
+                return false;
+
+        }
+
+    }
+
+    public bool rightBlockCheck
+    {
+
+        get
+        {
+
+            if (overWorld.CheckForVoxel(transform.position.x + playerWidth + 0.2f, transform.position.y - playerHeight, transform.position.z) ||
+                overWorld.CheckForVoxel(transform.position.x + playerWidth + 0.2f, transform.position.y + playerHeight - 0.1f, transform.position.z))
                 return true;
             else
                 return false;
@@ -194,7 +212,19 @@ public class PlayerController : MonoBehaviour
         get
         {
             if (overWorld.CheckForVoxel(transform.position.x - playerWidth - 0.2f, transform.position.y - playerHeight, transform.position.z + playerWidth + 0.2f) ||
-                overWorld.CheckForVoxel(transform.position.x - playerWidth - 0.2f, transform.position.y + 1f, transform.position.z + playerWidth + 0.2f))
+                overWorld.CheckForVoxel(transform.position.x - playerWidth - 0.2f, transform.position.y + playerHeight - 0.1f, transform.position.z + playerWidth + 0.2f))
+                return true;
+            else
+                return false;
+        }
+    }
+
+    public bool frontRightBlockCheck
+    {
+        get
+        {
+            if (overWorld.CheckForVoxel(transform.position.x + playerWidth + 0.2f, transform.position.y - playerHeight, transform.position.z + playerWidth + 0.2f) ||
+                overWorld.CheckForVoxel(transform.position.x + playerWidth + 0.2f, transform.position.y + playerHeight - 0.1f, transform.position.z + playerWidth + 0.2f))
                 return true;
             else
                 return false;
@@ -206,35 +236,7 @@ public class PlayerController : MonoBehaviour
         get
         {
             if (overWorld.CheckForVoxel(transform.position.x - playerWidth - 0.2f, transform.position.y - playerHeight, transform.position.z - playerWidth - 0.2f) ||
-                overWorld.CheckForVoxel(transform.position.x - playerWidth - 0.2f, transform.position.y + 1f, transform.position.z - playerWidth - 0.2f))
-                return true;
-            else
-                return false;
-        }
-    }
-
-    public bool rightBlockCheck
-    {
-
-        get
-        {
-
-            if (overWorld.CheckForVoxel(transform.position.x + playerWidth + 0.2f, transform.position.y - playerHeight, transform.position.z) ||
-                overWorld.CheckForVoxel(transform.position.x + playerWidth + 0.2f, transform.position.y + 1f, transform.position.z))
-                return true;
-            else
-                return false;
-
-        }
-
-    }
-
-    public bool frontRightBlockCheck
-    {
-        get
-        {
-            if (overWorld.CheckForVoxel(transform.position.x + playerWidth + 0.2f, transform.position.y - playerHeight, transform.position.z + playerWidth + 0.2f) ||
-                overWorld.CheckForVoxel(transform.position.x + playerWidth + 0.2f, transform.position.y + 1f, transform.position.z + playerWidth + 0.2f))
+                overWorld.CheckForVoxel(transform.position.x - playerWidth - 0.2f, transform.position.y + playerHeight - 0.1f, transform.position.z - playerWidth - 0.2f))
                 return true;
             else
                 return false;
@@ -246,7 +248,7 @@ public class PlayerController : MonoBehaviour
         get
         {
             if (overWorld.CheckForVoxel(transform.position.x + playerWidth + 0.2f, transform.position.y - playerHeight, transform.position.z - playerWidth - 0.2f) ||
-                overWorld.CheckForVoxel(transform.position.x + playerWidth + 0.2f, transform.position.y + 1f, transform.position.z - playerWidth - 0.2f))
+                overWorld.CheckForVoxel(transform.position.x + playerWidth + 0.2f, transform.position.y + playerHeight - 0.1f, transform.position.z - playerWidth - 0.2f))
                 return true;
             else
                 return false;
