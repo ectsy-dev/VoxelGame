@@ -21,6 +21,7 @@ public class PlayerController : MonoBehaviour
     [SerializeField] private float playerWidth;
     [SerializeField] private float playerHeight;
     private bool isGrounded;
+    private bool isFlying;
 
     [Header("Player References")]
     [SerializeField] private Transform cameraTarget;
@@ -53,11 +54,33 @@ public class PlayerController : MonoBehaviour
 
     private void PlayerMovement(CharacterInput input)
     {
+        // Cap to 50ms so chunk-generation frame spikes don't cause tunneling
+        float dt = Mathf.Min(Time.deltaTime, 0.05f);
+
+        if (UnityEngine.Input.GetKeyDown(KeyCode.F))
+        {
+            isFlying = !isFlying;
+            velocity = Vector3.zero;
+        }
+
+        if (isFlying)
+        {
+            float flySpeed = moveSpeed * 4f;
+            float flyVertical = 0f;
+            if (input.Jump) flyVertical = flySpeed;
+            if (UnityEngine.Input.GetKey(KeyCode.LeftControl)) flyVertical = -flySpeed;
+
+            moveDirection = transform.forward * input.Move.y + transform.right * input.Move.x;
+            moveDirection.Normalize();
+            moveDirection = moveDirection * flySpeed * dt + Vector3.up * flyVertical * dt;
+            transform.Translate(moveDirection, Space.World);
+            return;
+        }
 
         if (velocity.y < 0)
-            velocity -= Vector3.up * gravity * fallMultiplier * Time.deltaTime;
+            velocity -= Vector3.up * gravity * fallMultiplier * dt;
         else
-            velocity -= Vector3.up * gravity * Time.deltaTime;
+            velocity -= Vector3.up * gravity * dt;
 
         if (input.Jump && isGrounded)
         {
@@ -70,8 +93,8 @@ public class PlayerController : MonoBehaviour
         moveDirection = transform.forward * input.Move.y + transform.right * input.Move.x;
         moveDirection.Normalize();
 
-        moveDirection *= moveSpeed * Time.deltaTime;
-        moveDirection += velocity * Time.deltaTime;
+        moveDirection *= moveSpeed * dt;
+        moveDirection += velocity * dt;
 
         if((moveDirection.z > 0 && frontBlockCheck) || (moveDirection.z < 0 && backBlockCheck))
             moveDirection.z = 0;

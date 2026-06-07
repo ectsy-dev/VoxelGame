@@ -25,7 +25,8 @@ public static class Noise
 
         }
 
-        return noiseValue;
+        // Max possible sum of amplitudes: 0.8 + 0.4 + 0.2 + 0.1 = 1.5 — normalize to [0, 1]
+        return noiseValue / 1.5f;
 
     }
 

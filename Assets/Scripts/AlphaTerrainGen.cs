@@ -1,0 +1,606 @@
+using System;
+using UnityEngine;
+
+public static class AlphaTerrainGen
+{
+    public const int WORLD_HEIGHT = 128;
+    public const int SEA_LEVEL = 64;
+
+    const short ID_AIR     = 0;
+    const short ID_BEDROCK = 1;
+    const short ID_GRASS   = 2;
+    const short ID_DIRT    = 3;
+    const short ID_STONE   = 4;
+    public const short ID_WATER = 5;
+    const short ID_SAND    = 6;
+
+    // ---------- Java LCG ----------
+
+    const ulong LCG_MUL  = 0x5DEECE66DUL;
+    const ulong LCG_ADD  = 0xBUL;
+    const ulong LCG_MASK = (1UL << 48) - 1;
+
+    static ulong RngInit(ulong seed) => (seed ^ LCG_MUL) & LCG_MASK;
+
+    static int RngBits(ref ulong r, int bits)
+    {
+        r = (r * LCG_MUL + LCG_ADD) & LCG_MASK;
+        return (int)(r >> (48 - bits));
+    }
+
+    static int RngInt(ref ulong r, int bound)
+    {
+        int m = bound - 1;
+        if ((bound & m) == 0)
+            return (int)((ulong)RngBits(ref r, 31) * (ulong)bound >> 31);
+        int u, v;
+        do { u = RngBits(ref r, 31); v = u % bound; } while (u - v + m < 0);
+        return v;
+    }
+
+    static double RngDouble(ref ulong r)
+    {
+        long hi = RngBits(ref r, 26);
+        long lo = RngBits(ref r, 27);
+        return ((hi << 27) + lo) * (1.0 / (1L << 53));
+    }
+
+    // ---------- Permutation Table ----------
+
+    struct PermTable { public double xo, yo, zo; public byte[] p; }
+
+    static PermTable[] InitOctaves(ref ulong r, int n)
+    {
+        var tables = new PermTable[n];
+        for (int i = 0; i < n; i++)
+        {
+            var t = new PermTable
+            {
+                xo = RngDouble(ref r) * 256.0,
+                yo = RngDouble(ref r) * 256.0,
+                zo = RngDouble(ref r) * 256.0,
+                p  = new byte[512]
+            };
+            byte j = 0;
+            do { t.p[j] = j; } while (j++ != 255);
+            byte idx = 0;
+            do
+            {
+                int ri = RngInt(ref r, 256 - idx) + idx;
+                if (ri != idx) { t.p[idx] ^= t.p[ri]; t.p[ri] ^= t.p[idx]; t.p[idx] ^= t.p[ri]; }
+                t.p[idx + 256] = t.p[idx];
+            } while (idx++ != 255);
+            tables[i] = t;
+        }
+        return tables;
+    }
+
+    // ---------- Perlin Helpers ----------
+
+    static double Fade(double t) => t * t * t * (t * (t * 6.0 - 15.0) + 10.0);
+    static double Lerp(double t, double a, double b) => a + t * (b - a);
+
+    static double Grad(byte h, double x, double y, double z)
+    {
+        switch (h & 0xF)
+        {
+            case 0x0: return  x + y; case 0x1: return -x + y;
+            case 0x2: return  x - y; case 0x3: return -x - y;
+            case 0x4: return  x + z; case 0x5: return -x + z;
+            case 0x6: return  x - z; case 0x7: return -x - z;
+            case 0x8: return  y + z; case 0x9: return -y + z;
+            case 0xA: return  y - z; case 0xB: return -y - z;
+            case 0xC: return  y + x; case 0xD: return -y + z;
+            case 0xE: return  y - x; case 0xF: return -y - z;
+            default:  return 0;
+        }
+    }
+
+    static double Grad2D(byte h, double x, double z) => Grad(h, x, 0, z);
+
+    // 3D Perlin accumulator — buffer layout: X-outer, Z-mid, Y-inner → [X*sz*sy + Z*sy + Y]
+    static void Accum3D(double[] buf, double bx, double by, double bz,
+        int sx, int sy, int sz, double fx, double fy, double fz,
+        double octFac, PermTable pt)
+    {
+        byte[] p = pt.p;
+        double inv = 1.0 / octFac;
+        int ci = 0, prevYb = -1;
+        double x1 = 0, x2 = 0, xx1 = 0, xx2 = 0;
+
+        for (int X = 0; X < sx; X++)
+        {
+            double xc = (bx + X) * fx + pt.xo;
+            int xi = (int)xc; if (xc < xi) xi--;
+            byte xb = (byte)((uint)xi & 0xFF);
+            xc -= xi;
+            double fdX = Fade(xc);
+
+            for (int Z = 0; Z < sz; Z++)
+            {
+                double zc = (bz + Z) * fz + pt.zo;
+                int zi = (int)zc; if (zc < zi) zi--;
+                byte zb = (byte)((uint)zi & 0xFF);
+                zc -= zi;
+                double fdZ = Fade(zc);
+
+                for (int Y = 0; Y < sy; Y++)
+                {
+                    double yc = (by + Y) * fy + pt.yo;
+                    int yi = (int)yc; if (yc < yi) yi--;
+                    byte yb = (byte)((uint)yi & 0xFF);
+                    yc -= yi;
+                    double fdY = Fade(yc);
+
+                    if (Y == 0 || yb != prevYb)
+                    {
+                        prevYb = yb;
+                        int k2 = p[p[xb]     + yb    ] + zb;
+                        int l2 = p[p[xb]     + yb + 1] + zb;
+                        int k3 = p[p[xb + 1] + yb    ] + zb;
+                        int l3 = p[p[xb + 1] + yb + 1] + zb;
+                        x1  = Lerp(fdX, Grad(p[k2],     xc,     yc,     zc), Grad(p[k3],     xc-1, yc,     zc));
+                        x2  = Lerp(fdX, Grad(p[l2],     xc,     yc - 1, zc), Grad(p[l3],     xc-1, yc - 1, zc));
+                        xx1 = Lerp(fdX, Grad(p[k2 + 1], xc,     yc,     zc-1), Grad(p[k3 + 1], xc-1, yc,     zc-1));
+                        xx2 = Lerp(fdX, Grad(p[l2 + 1], xc,     yc - 1, zc-1), Grad(p[l3 + 1], xc-1, yc - 1, zc-1));
+                    }
+
+                    double y1v = Lerp(fdY, x1, x2);
+                    double y2v = Lerp(fdY, xx1, xx2);
+                    buf[ci] += Lerp(fdZ, y1v, y2v) * inv;
+                    ci++;
+                }
+            }
+        }
+    }
+
+    // 2D Perlin accumulator — buffer layout: X-outer, Z-inner → [X*sz + Z]
+    static void Accum2D(double[] buf, double bx, double bz, int sx, int sz,
+        double fx, double fz, double octFac, PermTable pt)
+    {
+        byte[] p = pt.p;
+        double inv = 1.0 / octFac;
+        int ci = 0;
+
+        for (int X = 0; X < sx; X++)
+        {
+            double xc = (bx + X) * fx + pt.xo;
+            int xi = (int)xc; if (xc < xi) xi--;
+            byte xb = (byte)((uint)xi & 0xFF);
+            xc -= xi;
+            double fdX = Fade(xc);
+
+            for (int Z = 0; Z < sz; Z++)
+            {
+                double zc = (bz + Z) * fz + pt.zo;
+                int zi = (int)zc; if (zc < zi) zi--;
+                byte zb = (byte)((uint)zi & 0xFF);
+                zc -= zi;
+                double fdZ = Fade(zc);
+
+                int hxz  = p[p[xb]    ] + zb;
+                int hxz1 = p[p[xb + 1]] + zb;
+                double a = Lerp(fdX, Grad2D(p[hxz],     xc,     zc), Grad2D(p[hxz1],     xc-1, zc));
+                double b = Lerp(fdX, Grad2D(p[hxz + 1], xc, zc - 1), Grad2D(p[hxz1 + 1], xc-1, zc-1));
+                buf[ci] += Lerp(fdZ, a, b) * inv;
+                ci++;
+            }
+        }
+    }
+
+    static void GenNoise3D(double[] buf, double bx, double by, double bz,
+        int sx, int sy, int sz, double fx, double fy, double fz, PermTable[] octs)
+    {
+        Array.Clear(buf, 0, sx * sy * sz);
+        double f = 1.0;
+        foreach (var oct in octs) { Accum3D(buf, bx, by, bz, sx, sy, sz, fx*f, fy*f, fz*f, f, oct); f /= 2.0; }
+    }
+
+    static void GenNoise2D(double[] buf, double bx, double bz, int sx, int sz,
+        double fx, double fz, PermTable[] octs)
+    {
+        Array.Clear(buf, 0, sx * sz);
+        double f = 1.0;
+        foreach (var oct in octs) { Accum2D(buf, bx, bz, sx, sz, fx*f, fz*f, f, oct); f /= 2.0; }
+    }
+
+    // ---------- Simplex 2D (biomes) ----------
+
+    static readonly int[,] _g2 = {
+        {1,1},{-1,1},{1,-1},{-1,-1},{1,0},{-1,0},{1,0},{-1,0},{0,1},{0,-1},{0,1},{0,-1}
+    };
+    const double F2 = 0.3660254037844386;
+    const double G2 = 0.21132486540518713;
+
+    static void AccumSimplex(double[] buf, double bx, double bz, int sx, int sz,
+        double fx, double fz, double ampFac, PermTable pt)
+    {
+        byte[] p = pt.p;
+        int k = 0;
+        for (int X = 0; X < sx; X++)
+        {
+            double xc = (bx + X) * fx + pt.xo;
+            for (int Z = 0; Z < sz; Z++)
+            {
+                double zc = (bz + Z) * fz + pt.yo;
+                double s  = (xc + zc) * F2;
+                int ix = (int)(xc + s); if (xc + s < ix) ix--;
+                int iz = (int)(zc + s); if (zc + s < iz) iz--;
+                double td = (ix + iz) * G2;
+                double x0 = xc - (ix - td), z0 = zc - (iz - td);
+                int i1 = x0 > z0 ? 1 : 0, j1 = x0 > z0 ? 0 : 1;
+                double x1 = x0 - i1 + G2, z1 = z0 - j1 + G2;
+                double x2 = x0 - 1.0 + 2*G2, z2 = z0 - 1.0 + 2*G2;
+                byte gi0 = (byte)(p[((uint)ix       & 0xFF) + p[(uint)iz       & 0xFF]] % 12);
+                byte gi1 = (byte)(p[((uint)(ix + i1) & 0xFF) + p[(uint)(iz + j1) & 0xFF]] % 12);
+                byte gi2 = (byte)(p[((uint)(ix + 1) & 0xFF) + p[(uint)(iz + 1) & 0xFF]] % 12);
+                double t0 = 0.5 - x0*x0 - z0*z0;
+                double n0 = t0 < 0 ? 0 : t0*t0*t0*t0 * (_g2[gi0,0]*x0 + _g2[gi0,1]*z0);
+                double t1 = 0.5 - x1*x1 - z1*z1;
+                double n1 = t1 < 0 ? 0 : t1*t1*t1*t1 * (_g2[gi1,0]*x1 + _g2[gi1,1]*z1);
+                double t2 = 0.5 - x2*x2 - z2*z2;
+                double n2 = t2 < 0 ? 0 : t2*t2*t2*t2 * (_g2[gi2,0]*x2 + _g2[gi2,1]*z2);
+                buf[k] += 70.0 * (n0 + n1 + n2) * ampFac;
+                k++;
+            }
+        }
+    }
+
+    static void GenSimplex(double[] buf, double bx, double bz, int sx, int sz,
+        double fx, double fz, double ampFactor, PermTable[] octs)
+    {
+        Array.Clear(buf, 0, sx * sz);
+        fx /= 1.5; fz /= 1.5;
+        double octAmp = 1.0, octDim = 1.0;
+        foreach (var oct in octs)
+        {
+            AccumSimplex(buf, bx, bz, sx, sz, fx * octAmp, fz * octAmp, 0.55 / octDim, oct);
+            octAmp *= ampFactor;
+            octDim *= 0.5;
+        }
+    }
+
+    // ---------- Noise Table Set ----------
+
+    struct Noises
+    {
+        public PermTable[] minLimit, maxLimit, mainLimit;
+        public PermTable[] shoreComp, surfElev, scale, depth;
+        public PermTable[] temperature, humidity, precipitation;
+    }
+
+    static Noises _noises;
+    static int _noiseSeed = int.MinValue;
+
+    static void EnsureNoises(int seed)
+    {
+        if (seed == _noiseSeed) return;
+        ulong r = RngInit((ulong)(uint)seed);
+        _noises.minLimit   = InitOctaves(ref r, 16);
+        _noises.maxLimit   = InitOctaves(ref r, 16);
+        _noises.mainLimit  = InitOctaves(ref r, 8);
+        _noises.shoreComp  = InitOctaves(ref r, 4);
+        _noises.surfElev   = InitOctaves(ref r, 4);
+        _noises.scale      = InitOctaves(ref r, 10);
+        _noises.depth      = InitOctaves(ref r, 16);
+        InitOctaves(ref r, 8); // forest — advance RNG state, not used for terrain
+
+        ulong rt = RngInit((ulong)(uint)seed * 9871UL);
+        _noises.temperature = InitOctaves(ref rt, 4);
+        ulong rh = RngInit((ulong)(uint)seed * 39811UL);
+        _noises.humidity = InitOctaves(ref rh, 4);
+        ulong rp = RngInit((ulong)(uint)seed * 0x84a59UL);
+        _noises.precipitation = InitOctaves(ref rp, 2);
+        _noiseSeed = seed;
+    }
+
+    // ---------- Biome Maps ----------
+
+    static void GetBiomeMaps(int blockX, int blockZ, out double[] temp, out double[] humi)
+    {
+        temp  = new double[256];
+        humi  = new double[256];
+        var preci = new double[256];
+        GenSimplex(temp,  blockX, blockZ, 16, 16, 0.025, 0.025, 0.25,          _noises.temperature);
+        GenSimplex(humi,  blockX, blockZ, 16, 16, 0.050, 0.050, 1.0 / 3.0,    _noises.humidity);
+        GenSimplex(preci, blockX, blockZ, 16, 16, 0.25,  0.25,  0.58823529411, _noises.precipitation);
+        for (int i = 0; i < 256; i++)
+        {
+            double p  = preci[i] * 1.1 + 0.5;
+            double tv = (temp[i] * 0.15 + 0.7) * 0.99 + p * 0.01;
+            tv = 1.0 - (1.0 - tv) * (1.0 - tv);
+            temp[i] = Math.Max(0.0, Math.Min(1.0, tv));
+            double hv = (humi[i] * 0.15 + 0.5) * 0.998 + p * 0.002;
+            humi[i] = Math.Max(0.0, Math.Min(1.0, hv));
+        }
+    }
+
+    // ---------- Density Grid ----------
+
+    // 5x17x5 grid, indexed [cx*85 + cz*17 + cy]
+    static void FillDensityGrid(double[] grid, int chunkX, int chunkZ,
+        double[] temperatures, double[] humidities)
+    {
+        const double D = 684.412;
+
+        var scaleN = new double[25];
+        var depthN = new double[25];
+        GenNoise2D(scaleN, chunkX, chunkZ, 5, 5, 1.121, 1.121, _noises.scale);
+        GenNoise2D(depthN, chunkX, chunkZ, 5, 5, 200.0, 200.0, _noises.depth);
+
+        var mainN = new double[425];
+        var minN  = new double[425];
+        var maxN  = new double[425];
+        GenNoise3D(mainN, chunkX, 0, chunkZ, 5, 17, 5, D/80, D/160, D/80, _noises.mainLimit);
+        GenNoise3D(minN,  chunkX, 0, chunkZ, 5, 17, 5, D,    D,     D,    _noises.minLimit);
+        GenNoise3D(maxN,  chunkX, 0, chunkZ, 5, 17, 5, D,    D,     D,    _noises.maxLimit);
+
+        for (int cx = 0; cx < 5; cx++)
+        {
+            for (int cz = 0; cz < 5; cz++)
+            {
+                int cell = cx * 5 + cz;
+                int sX = Math.Min(cx * 3 + 1, 15);
+                int sZ = Math.Min(cz * 3 + 1, 15);
+                double t = temperatures[sX * 16 + sZ];
+                double h = humidities[sX * 16 + sZ];
+
+                double ard = 1.0 - h * t;
+                ard = 1.0 - ard * ard * ard * ard;
+
+                double surface = (scaleN[cell] / 512.0 + 256.0 / 512.0) * ard;
+                if (surface > 1.0) surface = 1.0;
+
+                double depth = depthN[cell] / 8000.0;
+                if (depth < 0.0) depth = -depth * 0.3;
+                depth = depth * 3.0 - 2.0;
+
+                if (depth < 0.0)
+                {
+                    depth = Math.Max(depth / 2.0, -1.0) / 1.4 / 2.0;
+                    surface = 0.0;
+                }
+                else
+                {
+                    depth = Math.Min(depth, 1.0) / 8.0;
+                }
+
+                surface = Math.Max(surface, 0.0) + 0.5;
+                double depthCol = 8.5 + depth * (17.0 / 16.0) * 4.0;
+
+                for (int cy = 0; cy < 17; cy++)
+                {
+                    int idx = cx * 85 + cz * 17 + cy;
+                    double colPS = ((cy - depthCol) * 12.0) / surface;
+                    if (colPS < 0.0) colPS *= 4.0;
+
+                    double minV  = minN[idx] / 512.0;
+                    double maxV  = maxN[idx] / 512.0;
+                    double mainV = (mainN[idx] / 10.0 + 1.0) / 2.0;
+
+                    double limit = mainV < 0.0 ? minV : mainV > 1.0 ? maxV : Lerp(mainV, minV, maxV);
+                    grid[idx] = limit - colPS;
+                }
+            }
+        }
+    }
+
+    // ---------- Terrain (trilinear interpolation) ----------
+
+    static void BuildTerrain(short[,,] raw, double[] grid)
+    {
+        for (int cx = 0; cx < 4; cx++)
+        for (int cz = 0; cz < 4; cz++)
+        for (int cy = 0; cy < 16; cy++)
+        {
+            double d000 = grid[ cx      * 85 +  cz      * 17 + cy    ];
+            double d001 = grid[ cx      * 85 + (cz + 1) * 17 + cy    ];
+            double d100 = grid[(cx + 1) * 85 +  cz      * 17 + cy    ];
+            double d101 = grid[(cx + 1) * 85 + (cz + 1) * 17 + cy    ];
+            double d010 = grid[ cx      * 85 +  cz      * 17 + cy + 1];
+            double d011 = grid[ cx      * 85 + (cz + 1) * 17 + cy + 1];
+            double d110 = grid[(cx + 1) * 85 +  cz      * 17 + cy + 1];
+            double d111 = grid[(cx + 1) * 85 + (cz + 1) * 17 + cy + 1];
+
+            double sY00 = (d010 - d000) * 0.125, sY01 = (d011 - d001) * 0.125;
+            double sY10 = (d110 - d100) * 0.125, sY11 = (d111 - d101) * 0.125;
+            double c00 = d000, c01 = d001, c10 = d100, c11 = d101;
+
+            for (int dy = 0; dy < 8; dy++)
+            {
+                int wy = cy * 8 + dy;
+                double sX0 = (c10 - c00) * 0.25, sX1 = (c11 - c01) * 0.25;
+                double v0 = c00, v1 = c01;
+                for (int dx = 0; dx < 4; dx++)
+                {
+                    int wx = cx * 4 + dx;
+                    double sZ = (v1 - v0) * 0.25, v = v0;
+                    for (int dz = 0; dz < 4; dz++)
+                    {
+                        raw[wx, wy, cz * 4 + dz] = v > 0.0 ? ID_STONE : ID_AIR;
+                        v += sZ;
+                    }
+                    v0 += sX0; v1 += sX1;
+                }
+                c00 += sY00; c01 += sY01; c10 += sY10; c11 += sY11;
+            }
+        }
+    }
+
+    // ---------- Surface Pass ----------
+
+    static void ReplaceSurface(short[,,] raw, int chunkX, int chunkZ,
+        double[] temperatures, double[] humidities)
+    {
+        const double nf = 0.03125;
+        ulong rng = RngInit(unchecked((ulong)((long)chunkX * 0x4f9939f508L + (long)chunkZ * 0x1ef1565bd5L)));
+
+        var sandN = new double[256];
+        var gravN = new double[256];
+        var elevN = new double[256];
+        // sandN: 3D slice at y=0
+        GenNoise3D(sandN, chunkX * 16, 0, chunkZ * 16, 16, 1, 16, nf,   nf,   1.0,  _noises.shoreComp);
+        // gravN: 2D with swapped X/Z to decorrelate from sand
+        GenNoise2D(gravN, chunkZ * 16, chunkX * 16, 16, 16, nf, nf,      _noises.shoreComp);
+        // elevN: 3D slice at y=0 for surface depth variation
+        GenNoise3D(elevN, chunkX * 16, 0, chunkZ * 16, 16, 1, 16, nf*2, nf*2, nf*2, _noises.surfElev);
+
+        for (int x = 0; x < 16; x++)
+        for (int z = 0; z < 16; z++)
+        {
+            int i = x * 16 + z;
+            bool sandy    = sandN[i] + RngDouble(ref rng) * 0.2 > 0.0;
+            bool gravelly = gravN[i] + RngDouble(ref rng) * 0.2 > 3.0;
+            int  elev     = (int)(elevN[i] / 3.0 + 3.0 + RngDouble(ref rng) * 0.25);
+
+            int   state = -1;
+            short above = ID_GRASS, below = ID_DIRT;
+
+            for (int y = WORLD_HEIGHT - 1; y >= SEA_LEVEL; y--)
+            {
+                short b = raw[x, y, z];
+                if (b == ID_AIR)   { state = -1; continue; }
+                if (b != ID_STONE) continue;
+
+                if (state == -1)
+                {
+                    if (y <= SEA_LEVEL)
+                    {
+                        above = ID_GRASS;
+                        below = ID_DIRT;
+                        state = elev < 1 ? 1 : elev;
+                    }
+                    else if (elev <= 0)
+                    {
+                        above = ID_AIR; below = ID_STONE;
+                        state = elev;
+                    }
+                    else
+                    {
+                        above = ID_GRASS; below = ID_DIRT;
+                        state = elev;
+                    }
+                    raw[x, y, z] = above;
+                }
+                else if (state > 0)
+                {
+                    state--;
+                    raw[x, y, z] = below;
+                }
+            }
+        }
+    }
+
+    // ---------- Water Fill ----------
+
+    static void FillWater(short[,,] raw)
+    {
+        for (int x = 0; x < 16; x++)
+        for (int z = 0; z < 16; z++)
+        for (int y = 0; y < SEA_LEVEL; y++)
+            if (raw[x, y, z] == ID_AIR) raw[x, y, z] = ID_WATER;
+    }
+
+    // ---------- Surface Cleanup ----------
+
+    static void FixExposedDirt(short[,,] raw)
+    {
+        for (int x = 0; x < 16; x++)
+        for (int y = 1; y < WORLD_HEIGHT - 1; y++)
+        for (int z = 0; z < 16; z++)
+        {
+            if (raw[x, y, z] == ID_DIRT && raw[x, y + 1, z] == ID_AIR)
+                raw[x, y, z] = ID_GRASS;
+        }
+    }
+
+    // ---------- Waterline / Seafloor ----------
+
+    // Replaces exposed stone at y=64 and y=63 that the state machine left untouched.
+    // Must run before FillWater so y=63 sand is not overwritten by water.
+    static void FixWaterlineStone(short[,,] raw)
+    {
+        for (int x = 0; x < 16; x++)
+        for (int z = 0; z < 16; z++)
+        {
+            if (raw[x, SEA_LEVEL,     z] == ID_STONE && raw[x, SEA_LEVEL + 1, z] == ID_AIR)
+                raw[x, SEA_LEVEL,     z] = ID_SAND;
+            if (raw[x, SEA_LEVEL - 1, z] == ID_STONE && raw[x, SEA_LEVEL,     z] == ID_AIR)
+                raw[x, SEA_LEVEL - 1, z] = ID_SAND;
+        }
+    }
+
+    // Replaces the topmost stone block in each underwater column with sand.
+    // Must run after FillWater so water presence can be detected.
+    static void PlaceSeafloor(short[,,] raw)
+    {
+        for (int x = 0; x < 16; x++)
+        for (int z = 0; z < 16; z++)
+        for (int y = SEA_LEVEL - 1; y >= 1; y--)
+        {
+            if (raw[x, y, z] == ID_STONE && raw[x, y + 1, z] == ID_WATER)
+            {
+                raw[x, y, z] = ID_SAND;
+                break;
+            }
+        }
+    }
+
+    // ---------- Bedrock ----------
+
+    static void PlaceBedrock(short[,,] raw, int chunkX, int chunkZ, int seed)
+    {
+        for (int x = 0; x < 16; x++)
+        for (int z = 0; z < 16; z++)
+        {
+            int wx = chunkX * 16 + x, wz = chunkZ * 16 + z;
+            int h = ((wx * 73856093) ^ (wz * 19349663) ^ (seed * 83492791)) & 0x7FFFFFFF;
+            h = h % 4;
+            for (int y = 0; y <= h; y++) raw[x, y, z] = ID_BEDROCK;
+        }
+    }
+
+    // ---------- Ore Gen ----------
+
+    static void PlaceOres(short[,,] raw, int chunkX, int chunkZ, int seed, Nodes[] nodes)
+    {
+        if (nodes == null || nodes.Length == 0) return;
+        for (int x = 0; x < 16; x++)
+        for (int y = 1; y < WORLD_HEIGHT; y++)
+        for (int z = 0; z < 16; z++)
+        {
+            if (raw[x, y, z] != ID_STONE) continue;
+            int wx = chunkX * 16 + x, wz = chunkZ * 16 + z;
+            foreach (var node in nodes)
+                if (y > node.minHeight && y < node.maxHeight)
+                    if (Noise.Get3DNoise(new Vector3(wx, y, wz), node.noiseThreshold, node.noiseScale, node.noiseOffset, seed))
+                        raw[x, y, z] = node.blockID;
+        }
+    }
+
+    // ---------- Public API ----------
+
+    public static short[,,] GenerateChunk(int chunkX, int chunkZ, int seed, Nodes[] oreNodes)
+    {
+        EnsureNoises(seed);
+
+        // raw is full chunkHeight (256) but only y=0..127 is filled; 128+ stays air
+        var raw = new short[(int)VoxelData.chunkWidth, (int)VoxelData.chunkHeight, (int)VoxelData.chunkWidth];
+
+        GetBiomeMaps(chunkX * 16, chunkZ * 16, out double[] temp, out double[] humi);
+
+        var grid = new double[425]; // 5*17*5
+        FillDensityGrid(grid, chunkX * 4, chunkZ * 4, temp, humi);
+        BuildTerrain(raw, grid);
+
+        ReplaceSurface(raw, chunkX, chunkZ, temp, humi);
+        FixExposedDirt(raw);
+        FixWaterlineStone(raw);
+        FillWater(raw);
+        PlaceSeafloor(raw);
+        PlaceBedrock(raw, chunkX, chunkZ, seed);
+        PlaceOres(raw, chunkX, chunkZ, seed, oreNodes);
+
+        return raw;
+    }
+}

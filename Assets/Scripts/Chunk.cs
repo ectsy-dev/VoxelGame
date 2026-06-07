@@ -1,4 +1,3 @@
-using NUnit.Framework;
 using System.Collections.Generic;
 using UnityEngine;
 
@@ -73,8 +72,18 @@ public class Chunk
                 for (int z = 0; z < VoxelData.chunkWidth; z++)
                 {
 
-                    if (worldObj.blockTypes[voxelMap[x, y, z]].isSolid)
-                        AddVoxelDataToChunk(new Vector3(x, y, z));
+                    short id = voxelMap[x, y, z];
+                    if (id == 0) continue;
+                    if (id >= worldObj.blockTypes.Length)
+                    {
+                        Debug.LogError($"Block ID {id} at ({x},{y},{z}) exceeds blockTypes array length {worldObj.blockTypes.Length}");
+                        continue;
+                    }
+
+                    if (worldObj.blockTypes[id].isSolid)
+                        AddVoxelDataToChunk(new Vector3(x, y, z), false);
+                    else if (worldObj.blockTypes[id].isTransparent)
+                        AddVoxelDataToChunk(new Vector3(x, y, z), true);
 
                 }
             }
@@ -114,23 +123,44 @@ public class Chunk
 
     }
 
-    public void AddVoxelDataToChunk(Vector3 pos)
+    // Returns raw block ID at a chunk-local position (queries world gen for out-of-chunk positions)
+    short GetBlockIDAt(Vector3 pos)
     {
+        int x = Mathf.FloorToInt(pos.x);
+        int y = Mathf.FloorToInt(pos.y);
+        int z = Mathf.FloorToInt(pos.z);
+
+        if (!IsVoxelInChunk(x, y, z))
+            return worldObj.GetVoxel(pos + position);
+
+        return voxelMap[x, y, z];
+    }
+
+    // transparent=true: render face when adjacent block is not the same transparent type
+    // transparent=false: render face when adjacent block is not solid (standard solid block behavior)
+    public void AddVoxelDataToChunk(Vector3 pos, bool transparent)
+    {
+
+        short thisID = voxelMap[(int)pos.x, (int)pos.y, (int)pos.z];
 
         for (int h = 0; h < 6; h++)
         {
 
-            if(!CheckVoxel(pos + VoxelData.faceChecks[h]))
-            {
+            Vector3 adjacentPos = pos + VoxelData.faceChecks[h];
+            short adjID = GetBlockIDAt(adjacentPos);
+            bool renderFace = transparent
+                ? adjID != thisID
+                : !CheckVoxel(adjacentPos);
 
-                short blockID = voxelMap[(int)pos.x, (int)pos.y, (int)pos.z];
+            if (renderFace)
+            {
 
                 vertices.Add(pos + VoxelData.voxelVerts[VoxelData.voxelTris[h, 0]]);
                 vertices.Add(pos + VoxelData.voxelVerts[VoxelData.voxelTris[h, 1]]);
                 vertices.Add(pos + VoxelData.voxelVerts[VoxelData.voxelTris[h, 2]]);
                 vertices.Add(pos + VoxelData.voxelVerts[VoxelData.voxelTris[h, 3]]);
 
-                AddTexture(worldObj.blockTypes[blockID].GetTextureID(h));
+                AddTexture(worldObj.blockTypes[thisID].GetTextureID(h));
 
                 triangles.Add(vertexIndex);
                 triangles.Add(vertexIndex + 1);
@@ -148,15 +178,12 @@ public class Chunk
 
     public void CreateMesh()
     {
-        Mesh mesh = new Mesh
-        {
-            vertices = vertices.ToArray(),
-            triangles = triangles.ToArray(),
-            uv = uvs.ToArray()
-        };
-
+        Mesh mesh = new Mesh();
+        mesh.indexFormat = UnityEngine.Rendering.IndexFormat.UInt32;
+        mesh.vertices = vertices.ToArray();
+        mesh.triangles = triangles.ToArray();
+        mesh.uv = uvs.ToArray();
         mesh.RecalculateNormals();
-
         meshFilter.mesh = mesh;
     }
 
@@ -179,7 +206,7 @@ public class Chunk
 
 }
 
-public class ChunkCoord
+public class ChunkCoord : System.IEquatable<ChunkCoord>
 {
 
     public int x;
@@ -196,6 +223,16 @@ public class ChunkCoord
         if (other == null)
             return false;
         return other.x == x && other.z == z;
+    }
+
+    public override bool Equals(object other) => Equals(other as ChunkCoord);
+
+    public override int GetHashCode()
+    {
+        int hash = 17;
+        hash = hash * 31 + x;
+        hash = hash * 31 + z;
+        return hash;
     }
 
 }
