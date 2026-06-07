@@ -13,21 +13,7 @@ MonoBehaviour:
   m_Name: DefaultBiome
   m_EditorClassIdentifier: 
   biomeName: Default
-  solidGroundHeight: 40
-  terrainHeight: 85
-  terrainScale: 0.25
-  nodes:
-  - nodName: Air Pass 1
-    blockID: 0
-    minHeight: 5
-    maxHeight: 255
-    noiseScale: 0.1
-    noiseThreshold: 0.56
-    noiseOffset: 100
-  - nodName: Air Pass 2
-    blockID: 0
-    minHeight: 5
-    maxHeight: 50
-    noiseScale: 1
-    noiseThreshold: 0.6
-    noiseOffset: 0
+  solidGroundHeight: 20
+  terrainHeight: 220
+  terrainScale: 0.4
+  nodes: []
