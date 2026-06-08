@@ -435,11 +435,8 @@ public static class AlphaTerrainGen
         const double nf = 0.03125;
         ulong rng = RngInit(unchecked((ulong)((long)chunkX * 0x4f9939f508L + (long)chunkZ * 0x1ef1565bd5L)));
 
-        var sandN = new double[256];
         var gravN = new double[256];
         var elevN = new double[256];
-        // sandN: 3D slice at y=0
-        GenNoise3D(sandN, chunkX * 16, 0, chunkZ * 16, 16, 1, 16, nf,   nf,   1.0,  _noises.shoreComp);
         // gravN: 2D with swapped X/Z to decorrelate from sand
         GenNoise2D(gravN, chunkZ * 16, chunkX * 16, 16, 16, nf, nf,      _noises.shoreComp);
         // elevN: 3D slice at y=0 for surface depth variation
@@ -449,7 +446,7 @@ public static class AlphaTerrainGen
         for (int z = 0; z < 16; z++)
         {
             int i = x * 16 + z;
-            bool sandy    = sandN[i] + RngDouble(ref rng) * 0.2 > 0.0;
+            RngDouble(ref rng); // preserve RNG sequence (was: sandy = sandN[i] + ...)
             bool gravelly = gravN[i] + RngDouble(ref rng) * 0.2 > 3.0;
             int  elev     = (int)(elevN[i] / 3.0 + 3.0 + RngDouble(ref rng) * 0.25);
 
@@ -530,6 +527,56 @@ public static class AlphaTerrainGen
         }
     }
 
+    // Places a sandy rim at y=64 along the shoreline, extending 1–4 blocks inland
+    // based on sandN noise. Pass 1 always fires at the immediate water edge; passes
+    // 2–4 require progressively higher sandN values, so wide beachy areas get a
+    // wider rim while narrow/cliffy coasts stay at 1 block.
+    static void PlaceBeachEdge(short[,,] raw, int chunkX, int chunkZ)
+    {
+        const double nf = 0.03125;
+        var sandN = new double[256];
+        GenNoise3D(sandN, chunkX * 16, 0, chunkZ * 16, 16, 1, 16, nf, nf, 1.0, _noises.shoreComp);
+
+        // Pass 1: immediate shoreline — always 1 block
+        for (int x = 0; x < 16; x++)
+        for (int z = 0; z < 16; z++)
+        {
+            if (raw[x, SEA_LEVEL, z] != ID_GRASS && raw[x, SEA_LEVEL, z] != ID_DIRT) continue;
+            if (raw[x, SEA_LEVEL + 1, z] != ID_AIR) continue;
+
+            bool atShoreline =
+                (x > 0  && raw[x - 1, SEA_LEVEL, z] == ID_AIR) ||
+                (x < 15 && raw[x + 1, SEA_LEVEL, z] == ID_AIR) ||
+                (z > 0  && raw[x, SEA_LEVEL, z - 1] == ID_AIR) ||
+                (z < 15 && raw[x, SEA_LEVEL, z + 1] == ID_AIR);
+
+            if (atShoreline)
+                raw[x, SEA_LEVEL, z] = ID_SAND;
+        }
+
+        // Passes 2–4: extend inland where sandN is high enough
+        for (int pass = 0; pass < 3; pass++)
+        {
+            double threshold = 0.3 + pass * 0.5; // 0.3, 0.8, 1.3
+            for (int x = 0; x < 16; x++)
+            for (int z = 0; z < 16; z++)
+            {
+                if (raw[x, SEA_LEVEL, z] != ID_GRASS && raw[x, SEA_LEVEL, z] != ID_DIRT) continue;
+                if (raw[x, SEA_LEVEL + 1, z] != ID_AIR) continue;
+                if (sandN[x * 16 + z] < threshold) continue;
+
+                bool nextToSand =
+                    (x > 0  && raw[x - 1, SEA_LEVEL, z] == ID_SAND) ||
+                    (x < 15 && raw[x + 1, SEA_LEVEL, z] == ID_SAND) ||
+                    (z > 0  && raw[x, SEA_LEVEL, z - 1] == ID_SAND) ||
+                    (z < 15 && raw[x, SEA_LEVEL, z + 1] == ID_SAND);
+
+                if (nextToSand)
+                    raw[x, SEA_LEVEL, z] = ID_SAND;
+            }
+        }
+    }
+
     // Replaces the topmost stone block in each underwater column with sand.
     // Must run after FillWater so water presence can be detected.
     static void PlaceSeafloor(short[,,] raw)
@@ -598,6 +645,7 @@ public static class AlphaTerrainGen
         FixWaterlineStone(raw);
         FillWater(raw);
         PlaceSeafloor(raw);
+        PlaceBeachEdge(raw, chunkX, chunkZ);
         PlaceBedrock(raw, chunkX, chunkZ, seed);
         PlaceOres(raw, chunkX, chunkZ, seed, oreNodes);
 
