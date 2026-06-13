@@ -186,10 +186,33 @@ public class World : MonoBehaviour
 
         var key = new Vector2Int(chunkX, chunkZ);
         if (!genCache.ContainsKey(key))
+        {
+            bool[,] west  = NeighborWaterMap(chunkX - 1, chunkZ);
+            bool[,] east  = NeighborWaterMap(chunkX + 1, chunkZ);
+            bool[,] south = NeighborWaterMap(chunkX, chunkZ - 1);
+            bool[,] north = NeighborWaterMap(chunkX, chunkZ + 1);
             genCache[key] = AlphaTerrainGen.GenerateChunk(chunkX, chunkZ, seedOffSet,
-                biomes != null && biomes.Length > 0 ? biomes[0].nodes : null);
+                biomes != null && biomes.Length > 0 ? biomes[0].nodes : null,
+                west, east, south, north);
+        }
 
         return genCache[key][lx, y, lz];
+    }
+
+    // Returns a 16×16 water map for a neighbor chunk.
+    // Fast path: extracts from genCache if the neighbor is already generated.
+    // Slow path: runs raw terrain only (no surface passes) via BuildWaterMap.
+    bool[,] NeighborWaterMap(int cx, int cz)
+    {
+        if (genCache.TryGetValue(new Vector2Int(cx, cz), out short[,,] cached))
+        {
+            var m = new bool[16, 16];
+            for (int x = 0; x < 16; x++)
+            for (int z = 0; z < 16; z++)
+                m[x, z] = cached[x, AlphaTerrainGen.SEA_LEVEL, z] == 0;
+            return m;
+        }
+        return AlphaTerrainGen.BuildWaterMap(cx, cz, seedOffSet);
     }
 
 }

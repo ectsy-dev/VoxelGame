@@ -13,6 +13,7 @@ public static class AlphaTerrainGen
     const short ID_STONE   = 4;
     public const short ID_WATER = 5;
     const short ID_SAND    = 6;
+    const short ID_GRAVEL  = 7;
 
     // ---------- Java LCG ----------
 
@@ -430,25 +431,61 @@ public static class AlphaTerrainGen
     // ---------- Surface Pass ----------
 
     static void ReplaceSurface(short[,,] raw, int chunkX, int chunkZ,
-        double[] temperatures, double[] humidities)
+        double[] temperatures, double[] humidities,
+        bool[,] westMap, bool[,] eastMap, bool[,] southMap, bool[,] northMap)
     {
         const double nf = 0.03125;
         ulong rng = RngInit(unchecked((ulong)((long)chunkX * 0x4f9939f508L + (long)chunkZ * 0x1ef1565bd5L)));
 
+        var sandN = new double[256];
         var gravN = new double[256];
         var elevN = new double[256];
-        // gravN: 2D with swapped X/Z to decorrelate from sand
-        GenNoise2D(gravN, chunkZ * 16, chunkX * 16, 16, 16, nf, nf,      _noises.shoreComp);
-        // elevN: 3D slice at y=0 for surface depth variation
-        GenNoise3D(elevN, chunkX * 16, 0, chunkZ * 16, 16, 1, 16, nf*2, nf*2, nf*2, _noises.surfElev);
+        GenNoise3D(sandN, chunkX * 16, 0, chunkZ * 16, 16, 1, 16, nf,    nf,    1.0,  _noises.shoreComp);
+        GenNoise2D(gravN, chunkZ * 16, chunkX * 16,    16, 16, nf, nf,          _noises.shoreComp);
+        GenNoise3D(elevN, chunkX * 16, 0, chunkZ * 16, 16, 1, 16, nf*2,  nf*2,  nf*2, _noises.surfElev);
+
+        // Precompute which columns are within beachRadius blocks of a water column
+        // (raw y=64 == AIR means terrain is below sea level). Read before the loop
+        // modifies raw so the proximity map is based on unmodified terrain.
+        const int beachRadius = 4;
+        var nearWater = new bool[256];
+        for (int x = 0; x < 16; x++)
+        for (int z = 0; z < 16; z++)
+        {
+            bool found = false;
+            for (int ox = -beachRadius; ox <= beachRadius && !found; ox++)
+            for (int oz = -beachRadius; oz <= beachRadius && !found; oz++)
+            {
+                if (ox*ox + oz*oz > beachRadius*beachRadius) continue;
+                int nx = x + ox, nz = z + oz;
+                bool inX = (uint)nx < 16, inZ = (uint)nz < 16;
+                if (inX && inZ)
+                {
+                    if (raw[nx, SEA_LEVEL, nz] == ID_AIR) found = true;
+                }
+                else if (!inX && inZ)
+                {
+                    var m = nx < 0 ? westMap : eastMap;
+                    if (m != null && m[nx < 0 ? nx + 16 : nx - 16, nz]) found = true;
+                }
+                else if (inX && !inZ)
+                {
+                    var m = nz < 0 ? southMap : northMap;
+                    if (m != null && m[nx, nz < 0 ? nz + 16 : nz - 16]) found = true;
+                }
+                // both out of bounds (chunk corner) — skip
+            }
+            nearWater[x * 16 + z] = found;
+        }
 
         for (int x = 0; x < 16; x++)
         for (int z = 0; z < 16; z++)
         {
             int i = x * 16 + z;
-            RngDouble(ref rng); // preserve RNG sequence (was: sandy = sandN[i] + ...)
-            bool gravelly = gravN[i] + RngDouble(ref rng) * 0.2 > 3.0;
-            int  elev     = (int)(elevN[i] / 3.0 + 3.0 + RngDouble(ref rng) * 0.25);
+            double sandRoll = RngDouble(ref rng);
+            bool gravelly   = nearWater[i] && gravN[i] + RngDouble(ref rng) * 0.2 > 3.0;
+            int  elev       = (int)(elevN[i] / 3.0 + 3.0 + RngDouble(ref rng) * 0.25);
+            bool sandy      = nearWater[i] && sandN[i] + sandRoll * 0.2 > 0.0;
 
             int   state = -1;
             short above = ID_GRASS, below = ID_DIRT;
@@ -461,10 +498,12 @@ public static class AlphaTerrainGen
 
                 if (state == -1)
                 {
-                    if (y <= SEA_LEVEL)
+                    if (y <= SEA_LEVEL + 1)
                     {
                         above = ID_GRASS;
                         below = ID_DIRT;
+                        if (gravelly) { above = ID_AIR;  below = ID_GRAVEL; }
+                        if (sandy)    { above = ID_SAND; below = ID_SAND;   }
                         state = elev < 1 ? 1 : elev;
                     }
                     else if (elev <= 0)
@@ -484,6 +523,155 @@ public static class AlphaTerrainGen
                     state--;
                     raw[x, y, z] = below;
                 }
+            }
+        }
+    }
+
+    // ---------- Beach Slope ----------
+
+    // Pass 1: fill the gravelly air pit at y=64 (no y=65 cascade).
+    // Pass 2 (x2): spread y=64 sand/gravel 2 blocks inland over flat terrain.
+    // Pass 3: raise y=65 at the inland beach edge only — columns not adjacent to water
+    //         but adjacent to solid land — so the raised rim sits 1-2 blocks back from
+    //         the waterline. Skipped when the beach is only 1 block wide.
+    static void BeachSlope(short[,,] raw)
+    {
+        // Pass 1 — fill gravelly pit at y=64 only
+        for (int x = 0; x < 16; x++)
+        for (int z = 0; z < 16; z++)
+        {
+            if (raw[x, SEA_LEVEL, z] == ID_AIR)
+            {
+                short b = raw[x, SEA_LEVEL - 1, z];
+                if (b == ID_GRAVEL || b == ID_SAND)
+                    raw[x, SEA_LEVEL, z] = b;
+            }
+        }
+
+        // Pass 2 — spread y=64 beach surface outward 2 blocks
+        int[] dx = { -1, 1,  0, 0 };
+        int[] dz = {  0, 0, -1, 1 };
+        for (int iter = 0; iter < 2; iter++)
+        {
+            var snap = new short[16, 16];
+            for (int x = 0; x < 16; x++)
+            for (int z = 0; z < 16; z++)
+                snap[x, z] = raw[x, SEA_LEVEL, z];
+
+            for (int x = 0; x < 16; x++)
+            for (int z = 0; z < 16; z++)
+            {
+                short s = snap[x, z];
+                if (s != ID_GRAVEL && s != ID_SAND) continue;
+
+                for (int d = 0; d < 4; d++)
+                {
+                    int nx = x + dx[d], nz = z + dz[d];
+                    if (nx < 0 || nx >= 16 || nz < 0 || nz >= 16) continue;
+                    short ng = snap[nx, nz];
+                    if (ng == ID_SAND || ng == ID_GRAVEL || ng == ID_AIR || ng == ID_WATER) continue;
+                    if (raw[nx, SEA_LEVEL + 1, nz] != ID_AIR) continue;
+                    raw[nx, SEA_LEVEL, nz] = s;
+                }
+            }
+        }
+
+        // Pass 3 — raise a y=65 rim at the inland edge of the beach only.
+        // Capped at 2 iterations so the rim covers at most 2 rows from the land
+        // edge; more iterations would flood the entire flat beach and create a
+        // checkerboard height artifact when the erosion pass carves it back.
+        int[] dx8 = { -1, 1,  0, 0, -1, -1, 1, 1 };
+        int[] dz8 = {  0, 0, -1, 1, -1,  1,-1, 1 };
+        for (int iter = 0; iter < 2; iter++)
+        {
+            bool changed = false;
+            var snap65 = new short[16, 16];
+            for (int x = 0; x < 16; x++)
+            for (int z = 0; z < 16; z++)
+                snap65[x, z] = raw[x, SEA_LEVEL + 1, z];
+
+            for (int x = 0; x < 16; x++)
+            for (int z = 0; z < 16; z++)
+            {
+                if (snap65[x, z] != ID_AIR) continue;
+                short s = raw[x, SEA_LEVEL, z];
+                if (s != ID_SAND && s != ID_GRAVEL) continue;
+
+                bool atWater = false;
+                for (int d = 0; d < 8; d++)
+                {
+                    int nx = x + dx8[d], nz = z + dz8[d];
+                    if (nx < 0 || nx >= 16 || nz < 0 || nz >= 16) continue;
+                    if (raw[nx, SEA_LEVEL, nz] == ID_AIR) { atWater = true; break; }
+                }
+                if (atWater) continue;
+
+                for (int d = 0; d < 4; d++)
+                {
+                    int nx = x + dx[d], nz = z + dz[d];
+                    if (nx < 0 || nx >= 16 || nz < 0 || nz >= 16) continue;
+                    short nb65 = snap65[nx, nz];
+                    if (nb65 != ID_AIR && nb65 != ID_WATER)
+                    {
+                        raw[x, SEA_LEVEL + 1, z] = s;
+                        changed = true;
+                        break;
+                    }
+                }
+            }
+            if (!changed) break;
+        }
+
+        // Erosion — two conditions, repeated until stable:
+        //   1. fewer than 2 solid y=65 cardinal neighbours (isolated / thin spur)
+        //   2. a y=65 cardinal neighbour is AIR and the cell 2 steps further in
+        //      that same direction is solid non-beach land (grass/dirt/stone) —
+        //      i.e. a 1-block air gap sits between this block and the land surface.
+        bool eroding = true;
+        while (eroding)
+        {
+            eroding = false;
+            var snapE = new short[16, 16];
+            for (int x = 0; x < 16; x++)
+            for (int z = 0; z < 16; z++)
+                snapE[x, z] = raw[x, SEA_LEVEL + 1, z];
+
+            for (int x = 0; x < 16; x++)
+            for (int z = 0; z < 16; z++)
+            {
+                short s = snapE[x, z];
+                if (s != ID_SAND && s != ID_GRAVEL) continue;
+
+                bool remove = false;
+
+                int solid = 0;
+                for (int d = 0; d < 4; d++)
+                {
+                    int nx = x + dx[d], nz = z + dz[d];
+                    if (nx < 0 || nx >= 16 || nz < 0 || nz >= 16) continue;
+                    if (snapE[nx, nz] != ID_AIR) solid++;
+                }
+                if (solid < 2) remove = true;
+
+                if (!remove)
+                {
+                    for (int d = 0; d < 4; d++)
+                    {
+                        int nx1 = x + dx[d],     nz1 = z + dz[d];
+                        int nx2 = x + dx[d] * 2, nz2 = z + dz[d] * 2;
+                        if (nx1 < 0 || nx1 >= 16 || nz1 < 0 || nz1 >= 16) continue;
+                        if (snapE[nx1, nz1] != ID_AIR) continue;
+                        if (nx2 < 0 || nx2 >= 16 || nz2 < 0 || nz2 >= 16) continue;
+                        short nb2 = snapE[nx2, nz2];
+                        if (nb2 != ID_AIR && nb2 != ID_WATER && nb2 != ID_SAND && nb2 != ID_GRAVEL)
+                        {
+                            remove = true;
+                            break;
+                        }
+                    }
+                }
+
+                if (remove) { raw[x, SEA_LEVEL + 1, z] = ID_AIR; eroding = true; }
             }
         }
     }
@@ -524,56 +712,6 @@ public static class AlphaTerrainGen
                 raw[x, SEA_LEVEL,     z] = ID_SAND;
             if (raw[x, SEA_LEVEL - 1, z] == ID_STONE && raw[x, SEA_LEVEL,     z] == ID_AIR)
                 raw[x, SEA_LEVEL - 1, z] = ID_SAND;
-        }
-    }
-
-    // Places a sandy rim at y=64 along the shoreline, extending 1–4 blocks inland
-    // based on sandN noise. Pass 1 always fires at the immediate water edge; passes
-    // 2–4 require progressively higher sandN values, so wide beachy areas get a
-    // wider rim while narrow/cliffy coasts stay at 1 block.
-    static void PlaceBeachEdge(short[,,] raw, int chunkX, int chunkZ)
-    {
-        const double nf = 0.03125;
-        var sandN = new double[256];
-        GenNoise3D(sandN, chunkX * 16, 0, chunkZ * 16, 16, 1, 16, nf, nf, 1.0, _noises.shoreComp);
-
-        // Pass 1: immediate shoreline — always 1 block
-        for (int x = 0; x < 16; x++)
-        for (int z = 0; z < 16; z++)
-        {
-            if (raw[x, SEA_LEVEL, z] != ID_GRASS && raw[x, SEA_LEVEL, z] != ID_DIRT) continue;
-            if (raw[x, SEA_LEVEL + 1, z] != ID_AIR) continue;
-
-            bool atShoreline =
-                (x > 0  && raw[x - 1, SEA_LEVEL, z] == ID_AIR) ||
-                (x < 15 && raw[x + 1, SEA_LEVEL, z] == ID_AIR) ||
-                (z > 0  && raw[x, SEA_LEVEL, z - 1] == ID_AIR) ||
-                (z < 15 && raw[x, SEA_LEVEL, z + 1] == ID_AIR);
-
-            if (atShoreline)
-                raw[x, SEA_LEVEL, z] = ID_SAND;
-        }
-
-        // Passes 2–4: extend inland where sandN is high enough
-        for (int pass = 0; pass < 3; pass++)
-        {
-            double threshold = 0.3 + pass * 0.5; // 0.3, 0.8, 1.3
-            for (int x = 0; x < 16; x++)
-            for (int z = 0; z < 16; z++)
-            {
-                if (raw[x, SEA_LEVEL, z] != ID_GRASS && raw[x, SEA_LEVEL, z] != ID_DIRT) continue;
-                if (raw[x, SEA_LEVEL + 1, z] != ID_AIR) continue;
-                if (sandN[x * 16 + z] < threshold) continue;
-
-                bool nextToSand =
-                    (x > 0  && raw[x - 1, SEA_LEVEL, z] == ID_SAND) ||
-                    (x < 15 && raw[x + 1, SEA_LEVEL, z] == ID_SAND) ||
-                    (z > 0  && raw[x, SEA_LEVEL, z - 1] == ID_SAND) ||
-                    (z < 15 && raw[x, SEA_LEVEL, z + 1] == ID_SAND);
-
-                if (nextToSand)
-                    raw[x, SEA_LEVEL, z] = ID_SAND;
-            }
         }
     }
 
@@ -627,11 +765,12 @@ public static class AlphaTerrainGen
 
     // ---------- Public API ----------
 
-    public static short[,,] GenerateChunk(int chunkX, int chunkZ, int seed, Nodes[] oreNodes)
+    public static short[,,] GenerateChunk(int chunkX, int chunkZ, int seed, Nodes[] oreNodes,
+        bool[,] westMap = null, bool[,] eastMap = null,
+        bool[,] southMap = null, bool[,] northMap = null)
     {
         EnsureNoises(seed);
 
-        // raw is full chunkHeight (256) but only y=0..127 is filled; 128+ stays air
         var raw = new short[(int)VoxelData.chunkWidth, (int)VoxelData.chunkHeight, (int)VoxelData.chunkWidth];
 
         GetBiomeMaps(chunkX * 16, chunkZ * 16, out double[] temp, out double[] humi);
@@ -640,15 +779,33 @@ public static class AlphaTerrainGen
         FillDensityGrid(grid, chunkX * 4, chunkZ * 4, temp, humi);
         BuildTerrain(raw, grid);
 
-        ReplaceSurface(raw, chunkX, chunkZ, temp, humi);
+        ReplaceSurface(raw, chunkX, chunkZ, temp, humi, westMap, eastMap, southMap, northMap);
+        BeachSlope(raw);
         FixExposedDirt(raw);
         FixWaterlineStone(raw);
         FillWater(raw);
         PlaceSeafloor(raw);
-        PlaceBeachEdge(raw, chunkX, chunkZ);
         PlaceBedrock(raw, chunkX, chunkZ, seed);
         PlaceOres(raw, chunkX, chunkZ, seed, oreNodes);
 
         return raw;
+    }
+
+    // Runs only FillDensityGrid + BuildTerrain (no surface passes) and returns a
+    // 16×16 bool map where true = y=SEA_LEVEL is air (terrain below sea level).
+    // Used by World.cs to provide cross-chunk water context before generating a neighbor.
+    public static bool[,] BuildWaterMap(int chunkX, int chunkZ, int seed)
+    {
+        EnsureNoises(seed);
+        GetBiomeMaps(chunkX * 16, chunkZ * 16, out double[] temp, out double[] humi);
+        var grid = new double[425];
+        FillDensityGrid(grid, chunkX * 4, chunkZ * 4, temp, humi);
+        var raw = new short[16, WORLD_HEIGHT, 16];
+        BuildTerrain(raw, grid);
+        var map = new bool[16, 16];
+        for (int x = 0; x < 16; x++)
+        for (int z = 0; z < 16; z++)
+            map[x, z] = raw[x, SEA_LEVEL, z] == ID_AIR;
+        return map;
     }
 }
