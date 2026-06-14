@@ -354,11 +354,11 @@ public static class AlphaTerrainGen
 
                 double depth = depthN[cell] / 8000.0;
                 if (depth < 0.0) depth = -depth * 0.3;
-                depth = depth * 3.0 - 2.0;
+                depth = depth * 3.0 - 1.5;
 
                 if (depth < 0.0)
                 {
-                    depth = Math.Max(depth / 2.0, -1.0) / 1.4 / 2.0;
+                    depth = Math.Max(depth / 2.0, -2.0) / 1.4 / 2.0;
                     surface = 0.0;
                 }
                 else
@@ -715,19 +715,67 @@ public static class AlphaTerrainGen
         }
     }
 
-    // Replaces the topmost stone block in each underwater column with sand.
+    // Replaces the top seafloor block per column with a material based on depth:
+    //   shallow (≤~5 below sea level) → sand
+    //   medium  (≤~15 below sea level) → gravel
+    //   deep    (>~15 below sea level) → stone (unchanged)
+    // Low-frequency Perlin noise shifts each threshold smoothly across space.
+    // A per-column hash dithers the material within a ±2 block transition zone
+    // around each boundary so the bands blend rather than cut cleanly.
     // Must run after FillWater so water presence can be detected.
-    static void PlaceSeafloor(short[,,] raw)
+    static void PlaceSeafloor(short[,,] raw, int chunkX, int chunkZ, int seed)
     {
+        var jitterN = new double[256];
+        GenNoise2D(jitterN, chunkX * 16, chunkZ * 16, 16, 16, 0.015, 0.015, _noises.shoreComp);
+
+        const double transWidth = 1.0;
+
         for (int x = 0; x < 16; x++)
         for (int z = 0; z < 16; z++)
-        for (int y = SEA_LEVEL - 1; y >= 1; y--)
         {
-            if (raw[x, y, z] == ID_STONE && raw[x, y + 1, z] == ID_WATER)
+            int yTop = -1;
+            for (int y = SEA_LEVEL - 1; y >= 1; y--)
             {
-                raw[x, y, z] = ID_SAND;
-                break;
+                if (raw[x, y, z] == ID_STONE && raw[x, y + 1, z] == ID_WATER)
+                    { yTop = y; break; }
             }
+            if (yTop < 0) continue;
+
+            int depth = (SEA_LEVEL - 1) - yTop;
+            double jitter = jitterN[x * 16 + z] * 1.0;
+
+            double sandThresh   = 1.5 + jitter;
+            double gravelThresh = 4.0 + jitter;
+
+            int wx = chunkX * 16 + x, wz = chunkZ * 16 + z;
+            int h = ((wx * 73856093) ^ (wz * 19349663) ^ (seed * 83492791)) & 0x7FFFFFFF;
+            double dither = (h % 1000) / 1000.0;
+
+            short block;
+            if (depth <= sandThresh - transWidth)
+            {
+                block = ID_SAND;
+            }
+            else if (depth <= sandThresh + transWidth)
+            {
+                double t = (depth - (sandThresh - transWidth)) / (transWidth * 2.0);
+                block = dither < (1.0 - t) ? ID_SAND : ID_GRAVEL;
+            }
+            else if (depth <= gravelThresh - transWidth)
+            {
+                block = ID_GRAVEL;
+            }
+            else if (depth <= gravelThresh + transWidth)
+            {
+                double t = (depth - (gravelThresh - transWidth)) / (transWidth * 2.0);
+                block = dither < (1.0 - t) ? ID_GRAVEL : ID_STONE;
+            }
+            else
+            {
+                block = ID_STONE;
+            }
+
+            if (block != ID_STONE) raw[x, yTop, z] = block;
         }
     }
 
@@ -784,7 +832,7 @@ public static class AlphaTerrainGen
         FixExposedDirt(raw);
         FixWaterlineStone(raw);
         FillWater(raw);
-        PlaceSeafloor(raw);
+        PlaceSeafloor(raw, chunkX, chunkZ, seed);
         PlaceBedrock(raw, chunkX, chunkZ, seed);
         PlaceOres(raw, chunkX, chunkZ, seed, oreNodes);
 
