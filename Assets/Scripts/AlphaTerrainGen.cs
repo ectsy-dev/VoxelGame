@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using UnityEngine;
 
 public static class AlphaTerrainGen
@@ -676,14 +677,169 @@ public static class AlphaTerrainGen
         }
     }
 
+    // ---------- Cave Carver ----------
+    // Translated from Minecraft Beta MapGenCaves.java
+
+    static void CarveCaves(short[,,] raw, int chunkX, int chunkZ, int seed)
+    {
+        const int RANGE = 8;
+        for (int scx = chunkX - RANGE; scx <= chunkX + RANGE; scx++)
+        for (int scz = chunkZ - RANGE; scz <= chunkZ + RANGE; scz++)
+        {
+            ulong r = RngInit(unchecked(
+                (ulong)((long)scx * 341873128712L + (long)scz * 132897987541L) ^ (ulong)(uint)seed));
+
+            // Matches MC: nextInt(nextInt(nextInt(40)+1)+1), then 15/16 chance → 0
+            int count = RngInt(ref r, RngInt(ref r, RngInt(ref r, 40) + 1) + 1);
+            if (RngInt(ref r, 15) != 0) count = 0;
+
+            for (int n = 0; n < count; n++)
+            {
+                double x = scx * 16 + RngInt(ref r, 16);
+                double y = RngInt(ref r, RngInt(ref r, 120) + 8);
+                double z = scz * 16 + RngInt(ref r, 16);
+
+                int tunnels = 1;
+                if (RngInt(ref r, 4) == 0)
+                {
+                    // Room: large squashed sphere, no pitch/yaw, roomMode=true (d3=0.5)
+                    float roomSize = 1.0f + (float)RngDouble(ref r) * 6.0f;
+                    CaveWorm(raw, chunkX, chunkZ, ref r, x, y, z, roomSize, 0f, 0f, -1, -1, 0.5);
+                    tunnels += RngInt(ref r, 4);
+                }
+
+                for (int t = 0; t < tunnels; t++)
+                {
+                    float yaw   = (float)(RngDouble(ref r) * Math.PI * 2.0);
+                    float pitch = (float)((RngDouble(ref r) - 0.5f) * 2.0f / 8.0f);
+                    float size  = (float)(RngDouble(ref r) * 2.0f + RngDouble(ref r));
+                    CaveWorm(raw, chunkX, chunkZ, ref r, x, y, z, size, yaw, pitch, 0, 0, 1.0);
+                }
+            }
+        }
+    }
+
+    static void CaveWorm(short[,,] raw, int chunkX, int chunkZ, ref ulong r,
+        double x, double y, double z,
+        float size, float yaw, float pitch,
+        int step, int length, double vertScale)
+    {
+        double cx = chunkX * 16 + 8.0;
+        double cz = chunkZ * 16 + 8.0;
+        float dYaw = 0f, dPitch = 0f;
+        bool roomMode = false;
+
+        if (length <= 0)
+        {
+            const int maxLen = 8 * 16 - 16; // RANGE * 16 - 16 = 112
+            length = maxLen - RngInt(ref r, maxLen / 4);
+        }
+        if (step == -1) { step = length / 2; roomMode = true; }
+
+        int branchAt    = RngInt(ref r, length / 2) + length / 4;
+        bool gentlePitch = RngInt(ref r, 6) == 0;
+
+        for (; step < length; step++)
+        {
+            double hw = 1.5 + Math.Sin(step * Math.PI / length) * size;
+            double hh = hw * vertScale;
+
+            float cosP = (float)Math.Cos(pitch);
+            x += Math.Cos(yaw) * cosP;
+            y += Math.Sin(pitch);
+            z += Math.Sin(yaw) * cosP;
+
+            pitch *= gentlePitch ? 0.92f : 0.7f;
+            pitch += dPitch * 0.1f;
+            yaw   += dYaw   * 0.1f;
+            dPitch *= 0.9f;
+            dYaw   *= 0.75f;
+            dPitch += (float)((RngDouble(ref r) - RngDouble(ref r)) * RngDouble(ref r) * 2.0);
+            dYaw   += (float)((RngDouble(ref r) - RngDouble(ref r)) * RngDouble(ref r) * 4.0);
+
+            // Fork into two branches at a specific step, then stop this worm
+            if (!roomMode && step == branchAt && size > 1.0f)
+            {
+                CaveWorm(raw, chunkX, chunkZ, ref r, x, y, z,
+                    (float)RngDouble(ref r) * 0.5f + 0.5f,
+                    yaw - (float)(Math.PI * 0.5), pitch / 3f, step, length, 1.0);
+                CaveWorm(raw, chunkX, chunkZ, ref r, x, y, z,
+                    (float)RngDouble(ref r) * 0.5f + 0.5f,
+                    yaw + (float)(Math.PI * 0.5), pitch / 3f, step, length, 1.0);
+                return;
+            }
+
+            if (!roomMode && RngInt(ref r, 4) == 0) continue;
+
+            // Early exit: worm is too far from chunk to ever carve it
+            double dx = x - cx, dz2 = z - cz;
+            if (dx*dx + dz2*dz2 - (double)(length - step) * (length - step) > (size + 18.0) * (size + 18.0))
+                return;
+
+            if (x < cx - 16 - hw*2 || z < cz - 16 - hw*2 ||
+                x > cx + 16 + hw*2 || z > cz + 16 + hw*2) continue;
+
+            int x0 = Math.Max((int)(x - hw) - chunkX * 16 - 1, 0);
+            int x1 = Math.Min((int)(x + hw) - chunkX * 16 + 2, 16);
+            int y0 = Math.Max((int)(y - hh) - 1, 1);
+            int y1 = Math.Min((int)(y + hh) + 2, SEA_LEVEL - 5);
+            int z0 = Math.Max((int)(z - hw) - chunkZ * 16 - 1, 0);
+            int z1 = Math.Min((int)(z + hw) - chunkZ * 16 + 2, 16);
+
+            // Skip step if water is present in/adjacent to carve bounds
+            bool hasWater = false;
+            for (int bx = x0; !hasWater && bx < x1; bx++)
+            for (int bz = z0; !hasWater && bz < z1; bz++)
+            for (int by = y1 + 1; !hasWater && by >= y0 - 1; by--)
+            {
+                if (by < 0 || by >= WORLD_HEIGHT) continue;
+                if (raw[bx, by, bz] == ID_WATER) { hasWater = true; break; }
+            }
+            if (hasWater) continue;
+
+            // Carve ellipsoid; dy > -0.7 cuts the bottom for a flat floor
+            for (int bx = x0; bx < x1; bx++)
+            {
+                double ndx = (bx + chunkX * 16 + 0.5 - x) / hw;
+                for (int bz = z0; bz < z1; bz++)
+                {
+                    double ndz = (bz + chunkZ * 16 + 0.5 - z) / hw;
+                    for (int by = y1 - 1; by >= y0; by--)
+                    {
+                        double ndy = (by + 0.5 - y) / hh;
+                        if (ndy > -0.7 && ndx*ndx + ndy*ndy + ndz*ndz < 1.0)
+                        {
+                            short b = raw[bx, by, bz];
+                            if (b == ID_STONE || b == ID_DIRT || b == ID_GRASS || b == ID_GRAVEL)
+                                raw[bx, by, bz] = ID_AIR;
+                        }
+                    }
+                }
+            }
+
+            if (roomMode) break;
+        }
+    }
+
     // ---------- Water Fill ----------
 
+    // Fills ocean water per column, stopping at the first solid block (seafloor).
+    // The old blanket fill (all air at y < SEA_LEVEL) flooded density-grid air
+    // pockets that sit below the seafloor, creating the visible water layer under
+    // the ocean floor. Scanning downward and breaking at solid ensures sub-seafloor
+    // pockets stay as air rather than getting flooded.
     static void FillWater(short[,,] raw)
     {
         for (int x = 0; x < 16; x++)
         for (int z = 0; z < 16; z++)
-        for (int y = 0; y < SEA_LEVEL; y++)
-            if (raw[x, y, z] == ID_AIR) raw[x, y, z] = ID_WATER;
+        {
+            if (raw[x, SEA_LEVEL, z] != ID_AIR) continue;
+            for (int y = SEA_LEVEL - 1; y >= 0; y--)
+            {
+                if (raw[x, y, z] == ID_AIR) raw[x, y, z] = ID_WATER;
+                else break;
+            }
+        }
     }
 
     // ---------- Surface Cleanup ----------
@@ -832,6 +988,7 @@ public static class AlphaTerrainGen
         FixExposedDirt(raw);
         FixWaterlineStone(raw);
         FillWater(raw);
+        CarveCaves(raw, chunkX, chunkZ, seed);
         PlaceSeafloor(raw, chunkX, chunkZ, seed);
         PlaceBedrock(raw, chunkX, chunkZ, seed);
         PlaceOres(raw, chunkX, chunkZ, seed, oreNodes);
