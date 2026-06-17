@@ -196,7 +196,7 @@ public class Chunk
         x *= VoxelData.normalizedBlockTextureSize;
         y *= VoxelData.normalizedBlockTextureSize;
 
-        float uvOffset = 0.001f;
+        float uvOffset = 0.0001f;
         uvs.Add(new Vector2(x + uvOffset, y + uvOffset));
         uvs.Add(new Vector2(x + uvOffset, y + VoxelData.normalizedBlockTextureSize - uvOffset));
         uvs.Add(new Vector2(x + VoxelData.normalizedBlockTextureSize - uvOffset, y + uvOffset));

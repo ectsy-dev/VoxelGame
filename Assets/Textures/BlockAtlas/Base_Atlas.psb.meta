@@ -34,7 +34,7 @@ ScriptedImporter:
     spriteExtrude: 1
     spriteMeshType: 0
     alignment: 0
-    spritePivot: {x: 0.5, y: 0.5}
+    spritePivot: {x: 0, y: 0}
     spritePixelsToUnits: 16
     spriteBorder: {x: 0, y: 0, z: 0, w: 0}
     spriteGenerateFallbackPhysicsShape: 0
@@ -107,7 +107,7 @@ ScriptedImporter:
       y: 4
       width: 256
       height: 64
-    spriteID: 199882c50e68a054abf2a1dab1038acb
+    spriteID: 191240fd5ceabad4f88ff2a8f4dc18a2
     spriteBone: []
     spriteOutline: []
     vertices: []
@@ -127,8 +127,8 @@ ScriptedImporter:
     ignorePlatformSupport: 0
     maxTextureSize: 512
     resizeAlgorithm: 1
-    textureFormat: 4
-    textureCompression: 1
+    textureFormat: -1
+    textureCompression: 0
     compressionQuality: 50
     forceMaximumCompressionQuality_BC6H_BC7: 0
     crunchedCompression: 0
@@ -139,7 +139,7 @@ ScriptedImporter:
     ignorePlatformSupport: 0
     maxTextureSize: 2048
     resizeAlgorithm: 0
-    textureFormat: -1
+    textureFormat: 12
     textureCompression: 1
     compressionQuality: 50
     forceMaximumCompressionQuality_BC6H_BC7: 0
@@ -152,7 +152,7 @@ ScriptedImporter:
   documentAlignment: 7
   importHiddenLayers: 0
   layerMappingOption: 2
-  generatePhysicsShape: 1
+  generatePhysicsShape: 0
   paperDollMode: 0
   keepDupilcateSpriteName: 1
   generateTileAssets: 0
@@ -176,8 +176,8 @@ ScriptedImporter:
     spriteName: Base Layer
     isGroup: 0
     parentIndex: -1
-    spriteID: 199882c50e68a054abf2a1dab1038acb
-    layerID: 31
+    spriteID: 191240fd5ceabad4f88ff2a8f4dc18a2
+    layerID: 135
     mosaicPosition: {x: 4, y: 4}
     flatten: 0
     isImported: 1
@@ -186,7 +186,7 @@ ScriptedImporter:
   rigPSDLayers: []
   sharedRigPSDLayers: []
   importFileNodeState: 1
-  platformSettingsDirtyTick: 639164635967801121
+  platformSettingsDirtyTick: 639172378610765979
   spriteSizeExpandChanged: 0
   generateGOHierarchy: 0
   textureAssetName: 
