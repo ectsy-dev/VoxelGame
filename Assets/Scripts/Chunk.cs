@@ -13,12 +13,22 @@ public class Chunk
     List<Vector3> vertices = new List<Vector3>();
     List<int> triangles = new List<int>();
     List<Vector2> uvs = new List<Vector2>();
+    List<Vector3> normals = new List<Vector3>();
 
     List<Vector3> transparentVertices = new List<Vector3>();
     List<int> transparentTriangles = new List<int>();
     List<Vector2> transparentUvs = new List<Vector2>();
+    List<Vector3> transparentNormals = new List<Vector3>();
 
     public short[,,] voxelMap = new short[VoxelData.chunkWidth, VoxelData.chunkHeight, VoxelData.chunkWidth];
+
+    // Cached as a plain field so BuildData() can read it safely from a background thread
+    // without touching the Unity API (chunkObject.transform.position is main-thread only)
+    Vector3 chunkPosition;
+
+    // Set to true at the end of BuildData(). volatile ensures the main thread sees
+    // the update immediately without CPU register caching.
+    public volatile bool isDataReady = false;
 
     World worldObj;
 
@@ -38,12 +48,24 @@ public class Chunk
 
         meshRenderer.materials = new Material[] { worldObj.atlasMaterial, worldObj.transparentAtlasMaterial };
         chunkObject.transform.parent = worldObj.transform;
-        chunkObject.transform.position = new Vector3(coord.x * VoxelData.chunkWidth, 0, coord.z * VoxelData.chunkWidth);
 
+        chunkPosition = new Vector3(coord.x * VoxelData.chunkWidth, 0, coord.z * VoxelData.chunkWidth);
+        chunkObject.transform.position = chunkPosition;
+
+    }
+
+    // Called on a background thread — no Unity API calls allowed here
+    public void BuildData()
+    {
         PopulateVoxelMap();
         CreateChunkData();
-        CreateMesh();
+        isDataReady = true;
+    }
 
+    // Called on the main thread once BuildData() is complete
+    public void ApplyMesh()
+    {
+        CreateMesh();
     }
 
     public void PopulateVoxelMap()
@@ -56,7 +78,7 @@ public class Chunk
                 for (int z = 0; z < VoxelData.chunkWidth; z++)
                 {
 
-                    voxelMap[x, y, z] = worldObj.GetVoxel(new Vector3(x, y, z) + position);
+                    voxelMap[x, y, z] = worldObj.GetVoxel(new Vector3(x, y, z) + chunkPosition);
 
                 }
             }
@@ -109,7 +131,7 @@ public class Chunk
 
     }
 
-    public Vector3 position => chunkObject.transform.position;
+    public Vector3 position => chunkPosition;
 
     public bool CheckVoxel(Vector3 pos)
     {
@@ -119,7 +141,7 @@ public class Chunk
         int z = Mathf.FloorToInt(pos.z);
 
         if (!IsVoxelInChunk(x, y, z))
-            return worldObj.blockTypes[worldObj.GetVoxel(pos + position)].isSolid;
+            return worldObj.blockTypes[worldObj.GetVoxel(pos + chunkPosition)].isSolid;
 
         return worldObj.blockTypes[voxelMap[x, y, z]].isSolid;
 
@@ -132,7 +154,7 @@ public class Chunk
         int z = Mathf.FloorToInt(pos.z);
 
         if (!IsVoxelInChunk(x, y, z))
-            return worldObj.GetVoxel(pos + position);
+            return worldObj.GetVoxel(pos + chunkPosition);
 
         return voxelMap[x, y, z];
     }
@@ -155,11 +177,18 @@ public class Chunk
 
             List<Vector3> verts = transparent ? transparentVertices : vertices;
             List<int> tris = transparent ? transparentTriangles : triangles;
+            List<Vector3> norms = transparent ? transparentNormals : normals;
 
             verts.Add(pos + VoxelData.voxelVerts[VoxelData.voxelTris[h, 0]]);
             verts.Add(pos + VoxelData.voxelVerts[VoxelData.voxelTris[h, 1]]);
             verts.Add(pos + VoxelData.voxelVerts[VoxelData.voxelTris[h, 2]]);
             verts.Add(pos + VoxelData.voxelVerts[VoxelData.voxelTris[h, 3]]);
+
+            Vector3 faceNormal = VoxelData.faceChecks[h];
+            norms.Add(faceNormal);
+            norms.Add(faceNormal);
+            norms.Add(faceNormal);
+            norms.Add(faceNormal);
 
             AddTexture(worldObj.blockTypes[thisID].GetTextureID(h), transparent);
 
@@ -183,6 +212,9 @@ public class Chunk
         var allUvs = new List<Vector2>(uvs);
         allUvs.AddRange(transparentUvs);
 
+        var allNormals = new List<Vector3>(normals);
+        allNormals.AddRange(transparentNormals);
+
         int solidCount = vertices.Count;
         var offsetTransTris = new int[transparentTriangles.Count];
         for (int i = 0; i < transparentTriangles.Count; i++)
@@ -192,10 +224,10 @@ public class Chunk
         mesh.indexFormat = UnityEngine.Rendering.IndexFormat.UInt32;
         mesh.vertices = allVertices.ToArray();
         mesh.uv = allUvs.ToArray();
+        mesh.normals = allNormals.ToArray();
         mesh.subMeshCount = 2;
         mesh.SetTriangles(triangles.ToArray(), 0);
         mesh.SetTriangles(offsetTransTris, 1);
-        mesh.RecalculateNormals();
         meshFilter.mesh = mesh;
     }
 

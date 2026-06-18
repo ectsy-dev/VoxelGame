@@ -1,5 +1,7 @@
 using UnityEngine;
 using System.Collections.Generic;
+using System.Collections.Concurrent;
+using System.Threading.Tasks;
 
 public class World : MonoBehaviour
 {
@@ -12,16 +14,20 @@ public class World : MonoBehaviour
 
     public BiomeAttributes[] biomes;
 
-    // Per-chunk raw block data, generated once on demand
-    Dictionary<Vector2Int, short[,,]> genCache = new Dictionary<Vector2Int, short[,,]>();
+    // ConcurrentDictionary allows background threads to call GetVoxel safely
+    // without an explicit lock. If two threads generate the same chunk simultaneously,
+    // GenerateChunk is deterministic so both results are identical — one is discarded.
+    ConcurrentDictionary<Vector2Int, short[,,]> genCache = new ConcurrentDictionary<Vector2Int, short[,,]>();
 
     public Material atlasMaterial;
     public Material transparentAtlasMaterial;
     public BlockTypes[] blockTypes;
 
-    // Vector2Int(chunkX, chunkZ) -> Chunk. Uses Unity's built-in struct equality — no custom hash needed.
     Dictionary<Vector2Int, Chunk> chunks = new Dictionary<Vector2Int, Chunk>();
     HashSet<Vector2Int> activeChunks = new HashSet<Vector2Int>();
+
+    // Chunks whose BuildData() has finished and are waiting for ApplyMesh() on the main thread
+    ConcurrentQueue<Chunk> meshReadyQueue = new ConcurrentQueue<Chunk>();
 
     int playerLastChunkX;
     int playerLastChunkZ;
@@ -29,7 +35,6 @@ public class World : MonoBehaviour
     public void Start()
     {
 
-        // Always use the PlayerController's own transform so World tracks the object that actually moves
         PlayerController pc = Object.FindFirstObjectByType<PlayerController>();
         if (pc != null)
             player = pc.transform;
@@ -46,7 +51,6 @@ public class World : MonoBehaviour
         float spawnX = 8f, spawnZ = 8f;
         int spawnY = AlphaTerrainGen.SEA_LEVEL + 2;
 
-        // Search outward until we find a land block above sea level
         bool spawnFound = false;
         int cw = (int)VoxelData.chunkWidth;
         for (int r = 0; r <= 4 && !spawnFound; r++)
@@ -69,7 +73,8 @@ public class World : MonoBehaviour
             }
         }
 
-        spawnPosition = new Vector3(spawnX, spawnY, spawnZ);
+        float spawnYF = spawnY + (pc != null ? pc.PlayerHeight : 1f);
+        spawnPosition = new Vector3(spawnX, spawnYF, spawnZ);
         player.position = spawnPosition;
 
         playerLastChunkX = Mathf.FloorToInt(spawnPosition.x / (int)VoxelData.chunkWidth);
@@ -83,6 +88,15 @@ public class World : MonoBehaviour
 
     private void Update()
     {
+
+        // Apply up to 3 ready chunk meshes per frame to avoid a spike
+        // when many chunks finish building simultaneously
+        int applied = 0;
+        while (applied < 3 && meshReadyQueue.TryDequeue(out Chunk readyChunk))
+        {
+            readyChunk.ApplyMesh();
+            applied++;
+        }
 
         int cx = Mathf.FloorToInt(player.position.x / (int)VoxelData.chunkWidth);
         int cz = Mathf.FloorToInt(player.position.z / (int)VoxelData.chunkWidth);
@@ -145,10 +159,15 @@ public class World : MonoBehaviour
 
     void CreateNewChunk(int x, int z)
     {
-
         Vector2Int coord = new Vector2Int(x, z);
-        chunks[coord] = new Chunk(this, new ChunkCoord(x, z));
+        Chunk chunk = new Chunk(this, new ChunkCoord(x, z));
+        chunks[coord] = chunk;
 
+        Task.Run(() =>
+        {
+            chunk.BuildData();
+            meshReadyQueue.Enqueue(chunk);
+        });
     }
 
     public bool CheckForVoxel(float x, float y, float z)
@@ -168,7 +187,7 @@ public class World : MonoBehaviour
 
         Vector2Int coord = new Vector2Int(xChunk, zChunk);
 
-        if (chunks.ContainsKey(coord) && chunks[coord] != null)
+        if (chunks.ContainsKey(coord) && chunks[coord] != null && chunks[coord].isDataReady)
             return blockTypes[chunks[coord].voxelMap[xLocal, yi, zLocal]].isSolid;
 
         return blockTypes[GetVoxel(new Vector3(xi, yi, zi))].isSolid;
@@ -186,23 +205,20 @@ public class World : MonoBehaviour
         int lz = Mathf.FloorToInt(pos.z) - chunkZ * (int)VoxelData.chunkWidth;
 
         var key = new Vector2Int(chunkX, chunkZ);
-        if (!genCache.ContainsKey(key))
+        var data = genCache.GetOrAdd(key, _ =>
         {
             bool[,] west  = NeighborWaterMap(chunkX - 1, chunkZ);
             bool[,] east  = NeighborWaterMap(chunkX + 1, chunkZ);
             bool[,] south = NeighborWaterMap(chunkX, chunkZ - 1);
             bool[,] north = NeighborWaterMap(chunkX, chunkZ + 1);
-            genCache[key] = AlphaTerrainGen.GenerateChunk(chunkX, chunkZ, seedOffSet,
+            return AlphaTerrainGen.GenerateChunk(chunkX, chunkZ, seedOffSet,
                 biomes != null && biomes.Length > 0 ? biomes[0].nodes : null,
                 west, east, south, north);
-        }
+        });
 
-        return genCache[key][lx, y, lz];
+        return data[lx, y, lz];
     }
 
-    // Returns a 16×16 water map for a neighbor chunk.
-    // Fast path: extracts from genCache if the neighbor is already generated.
-    // Slow path: runs raw terrain only (no surface passes) via BuildWaterMap.
     bool[,] NeighborWaterMap(int cx, int cz)
     {
         if (genCache.TryGetValue(new Vector2Int(cx, cz), out short[,,] cached))
