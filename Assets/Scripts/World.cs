@@ -16,6 +16,7 @@ public class World : MonoBehaviour
     Dictionary<Vector2Int, short[,,]> genCache = new Dictionary<Vector2Int, short[,,]>();
 
     public Material atlasMaterial;
+    public Material transparentAtlasMaterial;
     public BlockTypes[] blockTypes;
 
     // Vector2Int(chunkX, chunkZ) -> Chunk. Uses Unity's built-in struct equality — no custom hash needed.

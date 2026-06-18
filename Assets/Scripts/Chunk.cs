@@ -10,10 +10,13 @@ public class Chunk
     MeshRenderer meshRenderer;
     MeshFilter meshFilter;
 
-    int vertexIndex = 0;
     List<Vector3> vertices = new List<Vector3>();
     List<int> triangles = new List<int>();
     List<Vector2> uvs = new List<Vector2>();
+
+    List<Vector3> transparentVertices = new List<Vector3>();
+    List<int> transparentTriangles = new List<int>();
+    List<Vector2> transparentUvs = new List<Vector2>();
 
     public short[,,] voxelMap = new short[VoxelData.chunkWidth, VoxelData.chunkHeight, VoxelData.chunkWidth];
 
@@ -33,14 +36,13 @@ public class Chunk
         meshFilter = chunkObject.AddComponent<MeshFilter>();
         meshRenderer = chunkObject.AddComponent<MeshRenderer>();
 
-        meshRenderer.material = worldObj.atlasMaterial;
+        meshRenderer.materials = new Material[] { worldObj.atlasMaterial, worldObj.transparentAtlasMaterial };
         chunkObject.transform.parent = worldObj.transform;
         chunkObject.transform.position = new Vector3(coord.x * VoxelData.chunkWidth, 0, coord.z * VoxelData.chunkWidth);
 
         PopulateVoxelMap();
         CreateChunkData();
         CreateMesh();
-
 
     }
 
@@ -80,10 +82,10 @@ public class Chunk
                         continue;
                     }
 
-                    if (worldObj.blockTypes[id].isSolid)
-                        AddVoxelDataToChunk(new Vector3(x, y, z), false);
-                    else if (worldObj.blockTypes[id].isTransparent)
+                    if (worldObj.blockTypes[id].isTransparent)
                         AddVoxelDataToChunk(new Vector3(x, y, z), true);
+                    else if (worldObj.blockTypes[id].isSolid)
+                        AddVoxelDataToChunk(new Vector3(x, y, z), false);
 
                 }
             }
@@ -123,7 +125,6 @@ public class Chunk
 
     }
 
-    // Returns raw block ID at a chunk-local position (queries world gen for out-of-chunk positions)
     short GetBlockIDAt(Vector3 pos)
     {
         int x = Mathf.FloorToInt(pos.x);
@@ -136,8 +137,6 @@ public class Chunk
         return voxelMap[x, y, z];
     }
 
-    // transparent=true: render face when adjacent block is not the same transparent type
-    // transparent=false: render face when adjacent block is not solid (standard solid block behavior)
     public void AddVoxelDataToChunk(Vector3 pos, bool transparent)
     {
 
@@ -152,25 +151,25 @@ public class Chunk
                 ? adjID != thisID
                 : !CheckVoxel(adjacentPos);
 
-            if (renderFace)
-            {
+            if (!renderFace) continue;
 
-                vertices.Add(pos + VoxelData.voxelVerts[VoxelData.voxelTris[h, 0]]);
-                vertices.Add(pos + VoxelData.voxelVerts[VoxelData.voxelTris[h, 1]]);
-                vertices.Add(pos + VoxelData.voxelVerts[VoxelData.voxelTris[h, 2]]);
-                vertices.Add(pos + VoxelData.voxelVerts[VoxelData.voxelTris[h, 3]]);
+            List<Vector3> verts = transparent ? transparentVertices : vertices;
+            List<int> tris = transparent ? transparentTriangles : triangles;
 
-                AddTexture(worldObj.blockTypes[thisID].GetTextureID(h));
+            verts.Add(pos + VoxelData.voxelVerts[VoxelData.voxelTris[h, 0]]);
+            verts.Add(pos + VoxelData.voxelVerts[VoxelData.voxelTris[h, 1]]);
+            verts.Add(pos + VoxelData.voxelVerts[VoxelData.voxelTris[h, 2]]);
+            verts.Add(pos + VoxelData.voxelVerts[VoxelData.voxelTris[h, 3]]);
 
-                triangles.Add(vertexIndex);
-                triangles.Add(vertexIndex + 1);
-                triangles.Add(vertexIndex + 2);
-                triangles.Add(vertexIndex + 2);
-                triangles.Add(vertexIndex + 1);
-                triangles.Add(vertexIndex + 3);
-                vertexIndex += 4;   
+            AddTexture(worldObj.blockTypes[thisID].GetTextureID(h), transparent);
 
-            }
+            int idx = verts.Count - 4;
+            tris.Add(idx);
+            tris.Add(idx + 1);
+            tris.Add(idx + 2);
+            tris.Add(idx + 2);
+            tris.Add(idx + 1);
+            tris.Add(idx + 3);
 
         }
 
@@ -178,16 +177,29 @@ public class Chunk
 
     public void CreateMesh()
     {
+        var allVertices = new List<Vector3>(vertices);
+        allVertices.AddRange(transparentVertices);
+
+        var allUvs = new List<Vector2>(uvs);
+        allUvs.AddRange(transparentUvs);
+
+        int solidCount = vertices.Count;
+        var offsetTransTris = new int[transparentTriangles.Count];
+        for (int i = 0; i < transparentTriangles.Count; i++)
+            offsetTransTris[i] = transparentTriangles[i] + solidCount;
+
         Mesh mesh = new Mesh();
         mesh.indexFormat = UnityEngine.Rendering.IndexFormat.UInt32;
-        mesh.vertices = vertices.ToArray();
-        mesh.triangles = triangles.ToArray();
-        mesh.uv = uvs.ToArray();
+        mesh.vertices = allVertices.ToArray();
+        mesh.uv = allUvs.ToArray();
+        mesh.subMeshCount = 2;
+        mesh.SetTriangles(triangles.ToArray(), 0);
+        mesh.SetTriangles(offsetTransTris, 1);
         mesh.RecalculateNormals();
         meshFilter.mesh = mesh;
     }
 
-    public void AddTexture(int textureID)
+    public void AddTexture(int textureID, bool transparent = false)
     {
 
         float y = textureID / VoxelData.textureAtlasSizeInBlocks;
@@ -197,10 +209,11 @@ public class Chunk
         y *= VoxelData.normalizedBlockTextureSize;
 
         float uvOffset = 0.0001f;
-        uvs.Add(new Vector2(x + uvOffset, y + uvOffset));
-        uvs.Add(new Vector2(x + uvOffset, y + VoxelData.normalizedBlockTextureSize - uvOffset));
-        uvs.Add(new Vector2(x + VoxelData.normalizedBlockTextureSize - uvOffset, y + uvOffset));
-        uvs.Add(new Vector2(x + VoxelData.normalizedBlockTextureSize - uvOffset, y + VoxelData.normalizedBlockTextureSize - uvOffset));
+        List<Vector2> targetUvs = transparent ? transparentUvs : uvs;
+        targetUvs.Add(new Vector2(x + uvOffset, y + uvOffset));
+        targetUvs.Add(new Vector2(x + uvOffset, y + VoxelData.normalizedBlockTextureSize - uvOffset));
+        targetUvs.Add(new Vector2(x + VoxelData.normalizedBlockTextureSize - uvOffset, y + uvOffset));
+        targetUvs.Add(new Vector2(x + VoxelData.normalizedBlockTextureSize - uvOffset, y + VoxelData.normalizedBlockTextureSize - uvOffset));
 
     }
 

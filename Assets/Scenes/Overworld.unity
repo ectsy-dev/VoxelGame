@@ -536,6 +536,7 @@ MonoBehaviour:
   biomes:
   - {fileID: 11400000, guid: cce344f94c91e5f4ba4d13a1d9ff046e, type: 2}
   atlasMaterial: {fileID: 2100000, guid: f0ea28dfee45db74daf513ff5d4b2050, type: 2}
+  transparentAtlasMaterial: {fileID: 2100000, guid: dfc5fdada3d659a4da7bbdf88fd282f7, type: 2}
   blockTypes:
   - blockName: Air
     isSolid: 0
@@ -654,6 +655,15 @@ MonoBehaviour:
     bottomFaceTexture: 11
     leftFaceTexture: 11
     rightFaceTexture: 11
+  - blockName: Glass
+    isSolid: 1
+    isTransparent: 1
+    backFaceTexture: 12
+    frontFaceTexture: 12
+    topFaceTexture: 12
+    bottomFaceTexture: 12
+    leftFaceTexture: 12
+    rightFaceTexture: 12
   - blockName: Obisdian
     isSolid: 1
     isTransparent: 0
@@ -674,7 +684,7 @@ MonoBehaviour:
     rightFaceTexture: 14
   - blockName: Ice
     isSolid: 1
-    isTransparent: 0
+    isTransparent: 1
     backFaceTexture: 15
     frontFaceTexture: 15
     topFaceTexture: 15
