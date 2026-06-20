@@ -12,7 +12,7 @@ public class World : MonoBehaviour
     public string worldSeed;
     public int seedOffSet;
 
-    public BiomeAttributes[] biomes;
+    public OreConfig oreConfig;
 
     // ConcurrentDictionary allows background threads to call GetVoxel safely
     // without an explicit lock. If two threads generate the same chunk simultaneously,
@@ -29,11 +29,17 @@ public class World : MonoBehaviour
     // Chunks whose BuildData() has finished and are waiting for ApplyMesh() on the main thread
     ConcurrentQueue<Chunk> meshReadyQueue = new ConcurrentQueue<Chunk>();
 
+    // Chunks waiting to be created — drained gradually in Update() to avoid a one-frame spike
+    Queue<Vector2Int> pendingCreations = new Queue<Vector2Int>();
+    HashSet<Vector2Int> pendingSet = new HashSet<Vector2Int>();
+    const int chunkCreationsPerFrame = 8;
+
     int playerLastChunkX;
     int playerLastChunkZ;
 
     public void Start()
     {
+        Application.targetFrameRate = 144;
 
         PlayerController pc = Object.FindFirstObjectByType<PlayerController>();
         if (pc != null)
@@ -98,15 +104,24 @@ public class World : MonoBehaviour
             applied++;
         }
 
+        // Create pending chunks gradually — closest first, capped per frame
+        int spawned = 0;
+        while (spawned < chunkCreationsPerFrame && pendingCreations.Count > 0)
+        {
+            Vector2Int coord = pendingCreations.Dequeue();
+            pendingSet.Remove(coord);
+            if (!chunks.ContainsKey(coord) && activeChunks.Contains(coord))
+            {
+                CreateNewChunk(coord.x, coord.y);
+                spawned++;
+            }
+        }
+
         int cx = Mathf.FloorToInt(player.position.x / (int)VoxelData.chunkWidth);
         int cz = Mathf.FloorToInt(player.position.z / (int)VoxelData.chunkWidth);
 
-        if (Time.frameCount % 120 == 0)
-            Debug.Log($"[World] tick: player pos={player.position} chunk=({cx},{cz}) last=({playerLastChunkX},{playerLastChunkZ}) totalChunks={chunks.Count}");
-
         if (cx != playerLastChunkX || cz != playerLastChunkZ)
         {
-            Debug.Log($"[World] chunk change ({playerLastChunkX},{playerLastChunkZ}) -> ({cx},{cz})");
             playerLastChunkX = cx;
             playerLastChunkZ = cz;
             CheckViewDistance();
@@ -122,7 +137,7 @@ public class World : MonoBehaviour
         int viewDist = (int)VoxelData.viewDistanceInChunks;
 
         HashSet<Vector2Int> newActiveChunks = new HashSet<Vector2Int>();
-        int created = 0;
+        var toQueue = new List<Vector2Int>();
 
         for (int x = pCx - viewDist; x < pCx + viewDist; x++)
         {
@@ -130,16 +145,28 @@ public class World : MonoBehaviour
             {
                 Vector2Int coord = new Vector2Int(x, z);
 
-                if (!chunks.ContainsKey(coord))
-                {
-                    CreateNewChunk(x, z);
-                    created++;
-                }
-                else if (!chunks[coord].IsActive)
+                if (!chunks.ContainsKey(coord) && !pendingSet.Contains(coord))
+                    toQueue.Add(coord);
+                else if (chunks.ContainsKey(coord) && !chunks[coord].IsActive)
                     chunks[coord].IsActive = true;
 
                 newActiveChunks.Add(coord);
             }
+        }
+
+        // Enqueue closest chunks first so nearby terrain appears before distant terrain
+        toQueue.Sort((a, b) =>
+        {
+            int da = (a.x - pCx) * (a.x - pCx) + (a.y - pCz) * (a.y - pCz);
+            int db = (b.x - pCx) * (b.x - pCx) + (b.y - pCz) * (b.y - pCz);
+            return da.CompareTo(db);
+        });
+        foreach (var coord in toQueue)
+        {
+            var c = coord;
+            Task.Run(() => GetOrGenerateChunkData(c.x, c.y));
+            pendingCreations.Enqueue(coord);
+            pendingSet.Add(coord);
         }
 
         int deactivated = 0;
@@ -153,7 +180,6 @@ public class World : MonoBehaviour
         }
 
         activeChunks = newActiveChunks;
-        Debug.Log($"[World] CheckViewDistance at ({pCx},{pCz}): created={created} deactivated={deactivated} totalChunks={chunks.Count} active={activeChunks.Count}");
 
     }
 
@@ -194,6 +220,24 @@ public class World : MonoBehaviour
 
     }
 
+    short[,,] GetOrGenerateChunkData(int chunkX, int chunkZ)
+    {
+        var key = new Vector2Int(chunkX, chunkZ);
+        return genCache.GetOrAdd(key, _ =>
+        {
+            bool[,] west  = NeighborWaterMap(chunkX - 1, chunkZ);
+            bool[,] east  = NeighborWaterMap(chunkX + 1, chunkZ);
+            bool[,] south = NeighborWaterMap(chunkX, chunkZ - 1);
+            bool[,] north = NeighborWaterMap(chunkX, chunkZ + 1);
+            return AlphaTerrainGen.GenerateChunk(chunkX, chunkZ, seedOffSet,
+                oreConfig != null ? oreConfig.nodes : null,
+                west, east, south, north);
+        });
+    }
+
+    public short[,,] GetChunkRawData(int chunkX, int chunkZ) =>
+        GetOrGenerateChunkData(chunkX, chunkZ);
+
     public short GetVoxel(Vector3 pos)
     {
         int y = Mathf.FloorToInt(pos.y);
@@ -204,18 +248,7 @@ public class World : MonoBehaviour
         int lx = Mathf.FloorToInt(pos.x) - chunkX * (int)VoxelData.chunkWidth;
         int lz = Mathf.FloorToInt(pos.z) - chunkZ * (int)VoxelData.chunkWidth;
 
-        var key = new Vector2Int(chunkX, chunkZ);
-        var data = genCache.GetOrAdd(key, _ =>
-        {
-            bool[,] west  = NeighborWaterMap(chunkX - 1, chunkZ);
-            bool[,] east  = NeighborWaterMap(chunkX + 1, chunkZ);
-            bool[,] south = NeighborWaterMap(chunkX, chunkZ - 1);
-            bool[,] north = NeighborWaterMap(chunkX, chunkZ + 1);
-            return AlphaTerrainGen.GenerateChunk(chunkX, chunkZ, seedOffSet,
-                biomes != null && biomes.Length > 0 ? biomes[0].nodes : null,
-                west, east, south, north);
-        });
-
+        var data = GetOrGenerateChunkData(chunkX, chunkZ);
         return data[lx, y, lz];
     }
 

@@ -533,8 +533,7 @@ MonoBehaviour:
   spawnPosition: {x: 0, y: 0, z: 0}
   worldSeed: 1890929
   seedOffSet: 0
-  biomes:
-  - {fileID: 11400000, guid: cce344f94c91e5f4ba4d13a1d9ff046e, type: 2}
+  oreConfig: {fileID: 11400000, guid: 0a8befd9238f2374585bb9cd3ceae2a4, type: 2}
   atlasMaterial: {fileID: 2100000, guid: f0ea28dfee45db74daf513ff5d4b2050, type: 2}
   transparentAtlasMaterial: {fileID: 2100000, guid: dfc5fdada3d659a4da7bbdf88fd282f7, type: 2}
   blockTypes:
@@ -811,6 +810,7 @@ GameObject:
   m_Component:
   - component: {fileID: 2143059854}
   - component: {fileID: 2143059855}
+  - component: {fileID: 2143059856}
   m_Layer: 0
   m_Name: Player
   m_TagString: Untagged
@@ -849,6 +849,18 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   playerController: {fileID: 565287710}
   playerCamera: {fileID: 1508725447}
+--- !u!114 &2143059856
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 2143059853}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: a27c077a7ca8e124fb5a1d280cccf35e, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::FPSCounter
 --- !u!4 &543450651987973709 stripped
 Transform:
   m_CorrespondingSourceObject: {fileID: 5336644779666989057, guid: 4d47f5fc27049c340894695e00dd98fd, type: 3}

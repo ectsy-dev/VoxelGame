@@ -951,7 +951,7 @@ public static class AlphaTerrainGen
 
     // ---------- Ore Gen ----------
 
-    static void PlaceOres(short[,,] raw, int chunkX, int chunkZ, int seed, Nodes[] nodes)
+    static void PlaceOres(short[,,] raw, int chunkX, int chunkZ, int seed, OreNode[] nodes)
     {
         if (nodes == null || nodes.Length == 0) return;
         for (int x = 0; x < 16; x++)
@@ -969,7 +969,7 @@ public static class AlphaTerrainGen
 
     // ---------- Public API ----------
 
-    public static short[,,] GenerateChunk(int chunkX, int chunkZ, int seed, Nodes[] oreNodes,
+    public static short[,,] GenerateChunk(int chunkX, int chunkZ, int seed, OreNode[] oreNodes,
         bool[,] westMap = null, bool[,] eastMap = null,
         bool[,] southMap = null, bool[,] northMap = null)
     {
