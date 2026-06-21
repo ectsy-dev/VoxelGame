@@ -278,6 +278,8 @@ public class PlayerController : MonoBehaviour
         }
     }
 
+    public float PlayerHeight => playerHeight;
+
     public Transform GetCameraTarget() => cameraTarget;
 
 }

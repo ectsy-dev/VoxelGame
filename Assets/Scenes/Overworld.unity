@@ -14,19 +14,19 @@ OcclusionCullingSettings:
 RenderSettings:
   m_ObjectHideFlags: 0
   serializedVersion: 10
-  m_Fog: 0
-  m_FogColor: {r: 0.5, g: 0.5, b: 0.5, a: 1}
-  m_FogMode: 3
+  m_Fog: 1
+  m_FogColor: {r: 0.6, g: 0.8, b: 1, a: 1}
+  m_FogMode: 1
   m_FogDensity: 0.2
-  m_LinearFogStart: 0
-  m_LinearFogEnd: 300
+  m_LinearFogStart: 80
+  m_LinearFogEnd: 175
   m_AmbientSkyColor: {r: 0.212, g: 0.227, b: 0.259, a: 1}
   m_AmbientEquatorColor: {r: 0.114, g: 0.125, b: 0.133, a: 1}
   m_AmbientGroundColor: {r: 0.047, g: 0.043, b: 0.035, a: 1}
   m_AmbientIntensity: 1
   m_AmbientMode: 0
   m_SubtractiveShadowColor: {r: 0.42, g: 0.478, b: 0.627, a: 1}
-  m_SkyboxMaterial: {fileID: 10304, guid: 0000000000000000f000000000000000, type: 0}
+  m_SkyboxMaterial: {fileID: 2100000, guid: 5d3ca6ca8ed07954f8f056a1a4371b8a, type: 2}
   m_HaloStrength: 0.5
   m_FlareStrength: 1
   m_FlareFadeSpeed: 3
@@ -179,7 +179,7 @@ Camera:
     height: 1
   near clip plane: 0.1
   far clip plane: 1000
-  field of view: 60
+  field of view: 70
   orthographic: 0
   orthographic size: 5
   m_Depth: -1
@@ -533,13 +533,17 @@ MonoBehaviour:
   spawnPosition: {x: 0, y: 0, z: 0}
   worldSeed: 1890929
   seedOffSet: 0
-  biomes:
-  - {fileID: 11400000, guid: cce344f94c91e5f4ba4d13a1d9ff046e, type: 2}
+  oreConfig: {fileID: 11400000, guid: 0a8befd9238f2374585bb9cd3ceae2a4, type: 2}
   atlasMaterial: {fileID: 2100000, guid: f0ea28dfee45db74daf513ff5d4b2050, type: 2}
+  liquidMaterial: {fileID: 2100000, guid: 7daf2fe2f8df1b94a9b6aac0d71a729a, type: 2}
+  transparentAtlasMaterial: {fileID: 2100000, guid: dfc5fdada3d659a4da7bbdf88fd282f7, type: 2}
+  dayLightmap: {fileID: 2800000, guid: 58af435fdad626a4a9535017d296d0ff, type: 3}
+  nightLightmap: {fileID: 2800000, guid: fa939ed4542cd5342a17df9447df2f86, type: 3}
   blockTypes:
   - blockName: Air
     isSolid: 0
     isTransparent: 0
+    isLiquid: 0
     backFaceTexture: 0
     frontFaceTexture: 0
     topFaceTexture: 0
@@ -549,6 +553,7 @@ MonoBehaviour:
   - blockName: Bedrock
     isSolid: 1
     isTransparent: 0
+    isLiquid: 0
     backFaceTexture: 0
     frontFaceTexture: 0
     topFaceTexture: 0
@@ -558,6 +563,7 @@ MonoBehaviour:
   - blockName: Grass
     isSolid: 1
     isTransparent: 0
+    isLiquid: 0
     backFaceTexture: 2
     frontFaceTexture: 2
     topFaceTexture: 3
@@ -567,6 +573,7 @@ MonoBehaviour:
   - blockName: Dirt
     isSolid: 1
     isTransparent: 0
+    isLiquid: 0
     backFaceTexture: 4
     frontFaceTexture: 4
     topFaceTexture: 4
@@ -576,6 +583,7 @@ MonoBehaviour:
   - blockName: Stone
     isSolid: 1
     isTransparent: 0
+    isLiquid: 0
     backFaceTexture: 5
     frontFaceTexture: 5
     topFaceTexture: 5
@@ -585,6 +593,7 @@ MonoBehaviour:
   - blockName: Water
     isSolid: 0
     isTransparent: 1
+    isLiquid: 1
     backFaceTexture: 1
     frontFaceTexture: 1
     topFaceTexture: 1
@@ -594,6 +603,7 @@ MonoBehaviour:
   - blockName: Sand
     isSolid: 1
     isTransparent: 0
+    isLiquid: 0
     backFaceTexture: 32
     frontFaceTexture: 32
     topFaceTexture: 32
@@ -603,6 +613,7 @@ MonoBehaviour:
   - blockName: Gravel
     isSolid: 1
     isTransparent: 0
+    isLiquid: 0
     backFaceTexture: 33
     frontFaceTexture: 33
     topFaceTexture: 33
@@ -612,6 +623,7 @@ MonoBehaviour:
   - blockName: Cobblestone
     isSolid: 1
     isTransparent: 0
+    isLiquid: 0
     backFaceTexture: 6
     frontFaceTexture: 6
     topFaceTexture: 6
@@ -621,6 +633,7 @@ MonoBehaviour:
   - blockName: Mossy Cobblestone
     isSolid: 1
     isTransparent: 0
+    isLiquid: 0
     backFaceTexture: 7
     frontFaceTexture: 7
     topFaceTexture: 7
@@ -630,6 +643,7 @@ MonoBehaviour:
   - blockName: Log
     isSolid: 1
     isTransparent: 0
+    isLiquid: 0
     backFaceTexture: 8
     frontFaceTexture: 8
     topFaceTexture: 9
@@ -639,6 +653,7 @@ MonoBehaviour:
   - blockName: Oak Lumber
     isSolid: 1
     isTransparent: 0
+    isLiquid: 0
     backFaceTexture: 10
     frontFaceTexture: 10
     topFaceTexture: 10
@@ -648,15 +663,27 @@ MonoBehaviour:
   - blockName: Plank
     isSolid: 1
     isTransparent: 0
+    isLiquid: 0
     backFaceTexture: 11
     frontFaceTexture: 11
     topFaceTexture: 11
     bottomFaceTexture: 11
     leftFaceTexture: 11
     rightFaceTexture: 11
+  - blockName: Glass
+    isSolid: 1
+    isTransparent: 1
+    isLiquid: 0
+    backFaceTexture: 12
+    frontFaceTexture: 12
+    topFaceTexture: 12
+    bottomFaceTexture: 12
+    leftFaceTexture: 12
+    rightFaceTexture: 12
   - blockName: Obisdian
     isSolid: 1
     isTransparent: 0
+    isLiquid: 0
     backFaceTexture: 13
     frontFaceTexture: 13
     topFaceTexture: 13
@@ -666,6 +693,7 @@ MonoBehaviour:
   - blockName: Brick
     isSolid: 1
     isTransparent: 0
+    isLiquid: 0
     backFaceTexture: 14
     frontFaceTexture: 14
     topFaceTexture: 14
@@ -674,7 +702,8 @@ MonoBehaviour:
     rightFaceTexture: 14
   - blockName: Ice
     isSolid: 1
-    isTransparent: 0
+    isTransparent: 1
+    isLiquid: 0
     backFaceTexture: 15
     frontFaceTexture: 15
     topFaceTexture: 15
@@ -712,8 +741,59 @@ Transform:
   m_Children:
   - {fileID: 832575519}
   - {fileID: 410087041}
+  - {fileID: 1399916569}
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!1 &1399916568
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 1399916569}
+  - component: {fileID: 1399916570}
+  m_Layer: 0
+  m_Name: Skybox
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!4 &1399916569
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1399916568}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 1111441624}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!114 &1399916570
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1399916568}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 1d90e7a6b46554d4194185820c07f4d8, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::SkyboxController
+  skyboxMaterial: {fileID: 2100000, guid: 5d3ca6ca8ed07954f8f056a1a4371b8a, type: 2}
+  zenithColor: {r: 0.1, g: 0.35, b: 0.78, a: 1}
+  horizonColor: {r: 0.6, g: 0.8, b: 1, a: 1}
+  groundColor: {r: 0.05, g: 0.05, b: 0.05, a: 1}
+  fogStart: 80
+  fogEnd: 175
 --- !u!1 &1508725445
 GameObject:
   m_ObjectHideFlags: 0
@@ -801,6 +881,7 @@ GameObject:
   m_Component:
   - component: {fileID: 2143059854}
   - component: {fileID: 2143059855}
+  - component: {fileID: 2143059856}
   m_Layer: 0
   m_Name: Player
   m_TagString: Untagged
@@ -839,6 +920,18 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   playerController: {fileID: 565287710}
   playerCamera: {fileID: 1508725447}
+--- !u!114 &2143059856
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 2143059853}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: a27c077a7ca8e124fb5a1d280cccf35e, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::FPSCounter
 --- !u!4 &543450651987973709 stripped
 Transform:
   m_CorrespondingSourceObject: {fileID: 5336644779666989057, guid: 4d47f5fc27049c340894695e00dd98fd, type: 3}

@@ -4,7 +4,7 @@ using System.Collections.Generic;
 public class VoxelData
 {
     public static readonly uint chunkWidth = 16;
-    public static readonly uint chunkHeight = 128;
+    public static readonly uint chunkHeight = 256;
 
     public static readonly uint viewDistanceInChunks = 5;
 

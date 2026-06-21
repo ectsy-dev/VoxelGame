@@ -9,11 +9,7 @@ MonoBehaviour:
   m_GameObject: {fileID: 0}
   m_Enabled: 1
   m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 15124ec111860ed4fa179a5a35dfc594, type: 3}
-  m_Name: DefaultBiome
-  m_EditorClassIdentifier: 
-  biomeName: Default
-  solidGroundHeight: 20
-  terrainHeight: 220
-  terrainScale: 0.4
+  m_Script: {fileID: 11500000, guid: d30e8c823f8bdc8459a64c4de28d3abf, type: 3}
+  m_Name: DefaultNode
+  m_EditorClassIdentifier: Assembly-CSharp::OreConfig
   nodes: []
