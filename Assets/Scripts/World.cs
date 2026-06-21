@@ -6,12 +6,15 @@ using System.Threading.Tasks;
 public class World : MonoBehaviour
 {
 
+    [Header("Player Values")]
     public Transform player;
     public Vector3 spawnPosition;
 
+    [Header("World Generation Values")]
     public string worldSeed;
     public int seedOffSet;
 
+    [Header("Ore Generator")]
     public OreConfig oreConfig;
 
     // ConcurrentDictionary allows background threads to call GetVoxel safely
@@ -19,11 +22,16 @@ public class World : MonoBehaviour
     // GenerateChunk is deterministic so both results are identical — one is discarded.
     ConcurrentDictionary<Vector2Int, short[,,]> genCache = new ConcurrentDictionary<Vector2Int, short[,,]>();
 
+    [Header("Block Materials")]
     public Material atlasMaterial;
     public Material liquidMaterial;
     public Material transparentAtlasMaterial;
+
+    [Header("Lightmap Textures")]
     public Texture2D dayLightmap;
     public Texture2D nightLightmap;
+
+    [Header("Blocks")]
     public BlockTypes[] blockTypes;
 
     Dictionary<Vector2Int, Chunk> chunks = new Dictionary<Vector2Int, Chunk>();
@@ -137,8 +145,9 @@ public class World : MonoBehaviour
         {
             Vector2Int key = remeshQueue.Dequeue();
             remeshSet.Remove(key);
-            if (chunks.TryGetValue(key, out Chunk dirtyChunk) && dirtyChunk.isDataReady && dirtyChunk.IsActive)
+            if (chunks.TryGetValue(key, out Chunk dirtyChunk) && dirtyChunk.isDataReady && dirtyChunk.IsActive && !dirtyChunk.isMeshPending)
             {
+                dirtyChunk.isMeshPending = true;
                 Task.Run(() =>
                 {
                     dirtyChunk.RebuildMeshData();

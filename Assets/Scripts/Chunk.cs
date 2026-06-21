@@ -89,8 +89,9 @@ public class Chunk
 
     Vector3 chunkPosition;
 
-    public volatile bool isDataReady  = false;
-    public          bool isFirstBuild = true;
+    public volatile bool isDataReady   = false;
+    public volatile bool isMeshPending = false;
+    public          bool isFirstBuild  = true;
 
     World worldObj;
 
@@ -138,10 +139,15 @@ public class Chunk
 
         ComputeSkyLight();
         CreateChunkData();
+        isMeshPending = true;
         isDataReady = true;
     }
 
-    public void ApplyMesh() => CreateMesh();
+    public void ApplyMesh()
+    {
+        isMeshPending = false;
+        CreateMesh();
+    }
 
     // Called when a newly-loaded neighbor may have provided better border sky light values.
     // Re-computes sky light from the updated cache then rebuilds vertex data.
