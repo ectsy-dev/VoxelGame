@@ -318,7 +318,7 @@ public static class AlphaTerrainGen
         ulong rp = RngInit((ulong)(uint)seed * 0x84a59UL);
         _noises.precipitation = InitOctaves(ref rp, 2);
         ulong rc = RngInit((ulong)(uint)seed * 0x5F3759DFUL);
-        _noises.cave = InitOctaves(ref rc, 2);
+        _noises.cave = InitOctaves(ref rc, 1);
         _noiseSeed = seed;
     }
 
@@ -707,7 +707,65 @@ public static class AlphaTerrainGen
     // Cavern-centric source-chunk approach: each source chunk within RANGE has a chance
     // to spawn a full cave system. Every worm radiates from the carved room, so all
     // tunnels are connected by construction — no two independently-generated systems
-    // to hope happen to overlap.
+    // can hope to overlap.
+
+    // Noise-warped ellipsoid room anchored at (cx, cy, cz).
+    // Uses _noises.cave[0] to deform the boundary organically while remaining
+    // cross-chunk consistent (world-space coords feed into a seeded noise table).
+    static void CarveOrganicRoom(short[,,] raw, int chunkX, int chunkZ,
+        double cx, double cy, double cz, float radius)
+    {
+        const double noiseScale  = 0.09;  // ~11-block feature period
+        const double noiseWeight = 0.45;  // ±0.45 normalized boundary warp
+        const double vScale      = 0.55;  // vertical squash
+
+        double xr = radius, yr = radius * vScale, zr = radius;
+        int bx0 = Math.Max((int)(cx - xr - 2) - chunkX * 16, 0);
+        int bx1 = Math.Min((int)(cx + xr + 2) - chunkX * 16 + 1, 16);
+        int bz0 = Math.Max((int)(cz - zr - 2) - chunkZ * 16, 0);
+        int bz1 = Math.Min((int)(cz + zr + 2) - chunkZ * 16 + 1, 16);
+        int by0  = Math.Max((int)(cy - yr - 1), 6);
+        int by1  = Math.Min((int)(cy + yr + 1), WORLD_HEIGHT - 2);
+
+        if (bx0 >= bx1 || bz0 >= bz1) return;
+
+        for (int bx = bx0; bx < bx1; bx++)
+        for (int bz = bz0; bz < bz1; bz++)
+        {
+            bool colWater = false;
+            for (int by = by0 - 1; by <= by1 + 1 && !colWater; by++)
+            {
+                if (by < 0 || by >= WORLD_HEIGHT) continue;
+                if (raw[bx, by, bz] == ID_WATER) colWater = true;
+            }
+            if (colWater) continue;
+
+            double wx = bx + chunkX * 16 + 0.5;
+            double wz = bz + chunkZ * 16 + 0.5;
+
+            for (int by = by0; by <= by1; by++)
+            {
+                short blk = raw[bx, by, bz];
+                if (blk != ID_STONE && blk != ID_DIRT && blk != ID_GRASS &&
+                    blk != ID_GRAVEL && blk != ID_SAND) continue;
+
+                double wy  = by + 0.5;
+                double ndx = (wx - cx) / xr;
+                double ndy = (wy - cy) / yr;
+                double ndz = (wz - cz) / zr;
+                double dist = Math.Sqrt(ndx * ndx + ndy * ndy + ndz * ndz);
+
+                if (dist > 1.6) continue;
+
+                double n = Sample3D(wx * noiseScale, wy * noiseScale, wz * noiseScale,
+                    _noises.cave[0]);
+                if (dist - n * noiseWeight < 1.0)
+                    raw[bx, by, bz] = ID_AIR;
+            }
+        }
+    }
+
+    // ---------- Cave Generation ----------
     //
     //   Pipeline per winning source chunk:
     //     1. Room      — large squashed sphere at y=28–55 (the cavern)
@@ -735,10 +793,9 @@ public static class AlphaTerrainGen
             double y = RngInt(ref r, 27) + 28; // y=28–55, above bedrock, well below surface
             double z = scz * 16 + RngInt(ref r, 16);
 
-            // 1. Cavern room — large squashed sphere (vertScale=0.5 flattens it)
-            float roomSize = 2.5f + (float)(RngDouble(ref r) * 3.5); // radius 2.5–6.0
-            CaveWorm(raw, chunkX, chunkZ, ref r, x, y, z,
-                roomSize, 0f, 0f, -1, -1, 0.5, WORLD_HEIGHT - 2);
+            // 1. Cavern room — noise-warped organic ellipsoid
+            float roomSize = 3.0f + (float)(RngDouble(ref r) * 3.5); // radius 3.0–6.5
+            CarveOrganicRoom(raw, chunkX, chunkZ, x, y, z, roomSize);
 
             // 2. Entrance worm — upward, pitchDecay=0.98 maintains angle throughout.
             //    CaveWorm's water guard stops it before breaching ocean floor.
@@ -750,6 +807,7 @@ public static class AlphaTerrainGen
 
             // 3. Branch tunnels — near-horizontal, cross chunk boundaries, stitch
             //    neighboring cavern systems together. size>1 enables forking.
+            //    baseHW=2.0 widens the worm tip so it bridges the last 1-3 block gap.
             int branches = RngInt(ref r, 3) + 2; // 2–4
             for (int b = 0; b < branches; b++)
             {
@@ -757,7 +815,7 @@ public static class AlphaTerrainGen
                 float bpitch = (float)((RngDouble(ref r) - 0.5) * 0.25); // ±0.125, near-horizontal
                 float bsz    = 1.0f + (float)(RngDouble(ref r) * 1.5);   // 1.0–2.5, allows branching
                 CaveWorm(raw, chunkX, chunkZ, ref r, x, y, z,
-                    bsz, byaw, bpitch, 0, 0, 1.0, (int)y + 15);
+                    bsz, byaw, bpitch, 0, 0, 1.0, (int)y + 15, -1f, 2.0f);
             }
 
             // 4. Deep connector — steep downward worm toward lower cave zone.
@@ -770,10 +828,12 @@ public static class AlphaTerrainGen
     }
 
     // pitchDecay: 0–1 overrides the random 0.7/0.92 choice. Pass -1 for default behavior.
+    // baseHW: minimum half-width at worm tips (default 1.5). Set higher for branch worms
+    //         so the tip ellipsoid is wide enough to bridge 1-3 block connection gaps.
     static void CaveWorm(short[,,] raw, int chunkX, int chunkZ, ref ulong r,
         double x, double y, double z,
         float size, float yaw, float pitch,
-        int step, int length, double vertScale, int yCeiling, float pitchDecay = -1f)
+        int step, int length, double vertScale, int yCeiling, float pitchDecay = -1f, float baseHW = 1.5f)
     {
         double cx = chunkX * 16 + 8.0;
         double cz = chunkZ * 16 + 8.0;
@@ -793,7 +853,7 @@ public static class AlphaTerrainGen
 
         for (; step < length; step++)
         {
-            double hw = 1.5 + Math.Sin(step * Math.PI / length) * size;
+            double hw = baseHW + Math.Sin(step * Math.PI / length) * size;
             double hh = hw * vertScale;
 
             float cosP = (float)Math.Cos(pitch);
@@ -862,7 +922,8 @@ public static class AlphaTerrainGen
                         if (ndy > -0.7 && ndx*ndx + ndy*ndy + ndz*ndz < 1.0)
                         {
                             short b = raw[bx, by, bz];
-                            if (b == ID_STONE || b == ID_DIRT || b == ID_GRASS || b == ID_GRAVEL)
+                            if (b == ID_STONE || b == ID_DIRT || b == ID_GRASS ||
+                                b == ID_GRAVEL || b == ID_SAND)
                                 raw[bx, by, bz] = ID_AIR;
                         }
                     }
