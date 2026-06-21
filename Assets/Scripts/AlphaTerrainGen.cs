@@ -100,6 +100,29 @@ public static class AlphaTerrainGen
 
     static double Grad2D(byte h, double x, double z) => Grad(h, x, 0, z);
 
+    static double Sample3D(double x, double y, double z, PermTable pt)
+    {
+        byte[] p = pt.p;
+        double px = x + pt.xo, py = y + pt.yo, pz = z + pt.zo;
+        int xi = (int)px; if (px < xi) xi--;
+        int yi = (int)py; if (py < yi) yi--;
+        int zi = (int)pz; if (pz < zi) zi--;
+        byte xb = (byte)((uint)xi & 0xFF);
+        byte yb = (byte)((uint)yi & 0xFF);
+        byte zb = (byte)((uint)zi & 0xFF);
+        double xc = px - xi, yc = py - yi, zc = pz - zi;
+        double fdX = Fade(xc), fdY = Fade(yc), fdZ = Fade(zc);
+        int k2 = p[p[xb    ] + yb    ] + zb;
+        int l2 = p[p[xb    ] + yb + 1] + zb;
+        int k3 = p[p[xb + 1] + yb    ] + zb;
+        int l3 = p[p[xb + 1] + yb + 1] + zb;
+        double x1  = Lerp(fdX, Grad(p[k2    ], xc,   yc,   zc  ), Grad(p[k3    ], xc-1, yc,   zc  ));
+        double x2  = Lerp(fdX, Grad(p[l2    ], xc,   yc-1, zc  ), Grad(p[l3    ], xc-1, yc-1, zc  ));
+        double xx1 = Lerp(fdX, Grad(p[k2 + 1], xc,   yc,   zc-1), Grad(p[k3 + 1], xc-1, yc,   zc-1));
+        double xx2 = Lerp(fdX, Grad(p[l2 + 1], xc,   yc-1, zc-1), Grad(p[l3 + 1], xc-1, yc-1, zc-1));
+        return Lerp(fdZ, Lerp(fdY, x1, x2), Lerp(fdY, xx1, xx2));
+    }
+
     // 3D Perlin accumulator — buffer layout: X-outer, Z-mid, Y-inner → [X*sz*sy + Z*sy + Y]
     static void Accum3D(double[] buf, double bx, double by, double bz,
         int sx, int sy, int sz, double fx, double fy, double fz,
@@ -269,6 +292,7 @@ public static class AlphaTerrainGen
         public PermTable[] minLimit, maxLimit, mainLimit;
         public PermTable[] shoreComp, surfElev, scale, depth;
         public PermTable[] temperature, humidity, precipitation;
+        public PermTable[] cave;
     }
 
     static Noises _noises;
@@ -293,6 +317,8 @@ public static class AlphaTerrainGen
         _noises.humidity = InitOctaves(ref rh, 4);
         ulong rp = RngInit((ulong)(uint)seed * 0x84a59UL);
         _noises.precipitation = InitOctaves(ref rp, 2);
+        ulong rc = RngInit((ulong)(uint)seed * 0x5F3759DFUL);
+        _noises.cave = InitOctaves(ref rc, 2);
         _noiseSeed = seed;
     }
 
@@ -677,52 +703,77 @@ public static class AlphaTerrainGen
         }
     }
 
-    // ---------- Cave Carver ----------
-    // Translated from Minecraft Beta MapGenCaves.java
+    // ---------- Cave Generation ----------
+    // Cavern-centric source-chunk approach: each source chunk within RANGE has a chance
+    // to spawn a full cave system. Every worm radiates from the carved room, so all
+    // tunnels are connected by construction — no two independently-generated systems
+    // to hope happen to overlap.
+    //
+    //   Pipeline per winning source chunk:
+    //     1. Room      — large squashed sphere at y=28–55 (the cavern)
+    //     2. Entrance  — one upward worm, slow pitch decay → punches to surface
+    //     3. Branches  — 2–4 near-horizontal worms crossing chunk boundaries
+    //     4. Connector — one steep downward worm linking to deeper zone
+    //
+    // Cross-chunk consistency: RNG seeded from (scx, scz, seed), so every chunk
+    // that examines source chunk (scx, scz) produces identical worms from it.
+    // CaveWorm's internal water guard stops entrance worms from breaching ocean floor.
 
-    static void CarveCaves(short[,,] raw, int chunkX, int chunkZ, int seed)
+    static void GenerateCaves(short[,,] raw, int chunkX, int chunkZ, int seed)
     {
-        const int RANGE = 8;
+        const int RANGE = 4; // examine 9×9 = 81 source chunks
+
         for (int scx = chunkX - RANGE; scx <= chunkX + RANGE; scx++)
         for (int scz = chunkZ - RANGE; scz <= chunkZ + RANGE; scz++)
         {
             ulong r = RngInit(unchecked(
                 (ulong)((long)scx * 341873128712L + (long)scz * 132897987541L) ^ (ulong)(uint)seed));
 
-            // Matches MC: nextInt(nextInt(nextInt(40)+1)+1), then 15/16 chance → 0
-            int count = RngInt(ref r, RngInt(ref r, RngInt(ref r, 40) + 1) + 1);
-            if (RngInt(ref r, 15) != 0) count = 0;
+            if (RngInt(ref r, 8) != 0) continue; // ~12.5% chance per source chunk
 
-            for (int n = 0; n < count; n++)
+            double x = scx * 16 + RngInt(ref r, 16);
+            double y = RngInt(ref r, 27) + 28; // y=28–55, above bedrock, well below surface
+            double z = scz * 16 + RngInt(ref r, 16);
+
+            // 1. Cavern room — large squashed sphere (vertScale=0.5 flattens it)
+            float roomSize = 2.5f + (float)(RngDouble(ref r) * 3.5); // radius 2.5–6.0
+            CaveWorm(raw, chunkX, chunkZ, ref r, x, y, z,
+                roomSize, 0f, 0f, -1, -1, 0.5, WORLD_HEIGHT - 2);
+
+            // 2. Entrance worm — upward, pitchDecay=0.98 maintains angle throughout.
+            //    CaveWorm's water guard stops it before breaching ocean floor.
+            float eyaw   = (float)(RngDouble(ref r) * Math.PI * 2.0);
+            float epitch = (float)(RngDouble(ref r) * 0.25 + 0.55); // 0.55–0.80 upward
+            float esz    = (float)(RngDouble(ref r) * 0.15 + 0.8);  // 0.8–0.95, never branches
+            CaveWorm(raw, chunkX, chunkZ, ref r, x, y, z,
+                esz, eyaw, epitch, 0, 0, 1.0, WORLD_HEIGHT - 2, 0.98f);
+
+            // 3. Branch tunnels — near-horizontal, cross chunk boundaries, stitch
+            //    neighboring cavern systems together. size>1 enables forking.
+            int branches = RngInt(ref r, 3) + 2; // 2–4
+            for (int b = 0; b < branches; b++)
             {
-                double x = scx * 16 + RngInt(ref r, 16);
-                double y = RngInt(ref r, RngInt(ref r, 120) + 8);
-                double z = scz * 16 + RngInt(ref r, 16);
-
-                int tunnels = 1;
-                if (RngInt(ref r, 4) == 0)
-                {
-                    // Room: large squashed sphere, no pitch/yaw, roomMode=true (d3=0.5)
-                    float roomSize = 1.0f + (float)RngDouble(ref r) * 6.0f;
-                    CaveWorm(raw, chunkX, chunkZ, ref r, x, y, z, roomSize, 0f, 0f, -1, -1, 0.5);
-                    tunnels += RngInt(ref r, 4);
-                }
-
-                for (int t = 0; t < tunnels; t++)
-                {
-                    float yaw   = (float)(RngDouble(ref r) * Math.PI * 2.0);
-                    float pitch = (float)((RngDouble(ref r) - 0.5f) * 2.0f / 8.0f);
-                    float size  = (float)(RngDouble(ref r) * 2.0f + RngDouble(ref r));
-                    CaveWorm(raw, chunkX, chunkZ, ref r, x, y, z, size, yaw, pitch, 0, 0, 1.0);
-                }
+                float byaw   = (float)(RngDouble(ref r) * Math.PI * 2.0);
+                float bpitch = (float)((RngDouble(ref r) - 0.5) * 0.25); // ±0.125, near-horizontal
+                float bsz    = 1.0f + (float)(RngDouble(ref r) * 1.5);   // 1.0–2.5, allows branching
+                CaveWorm(raw, chunkX, chunkZ, ref r, x, y, z,
+                    bsz, byaw, bpitch, 0, 0, 1.0, (int)y + 15);
             }
+
+            // 4. Deep connector — steep downward worm toward lower cave zone.
+            float dyaw   = (float)(RngDouble(ref r) * Math.PI * 2.0);
+            float dpitch = -(float)(RngDouble(ref r) * 0.3 + 0.3); // −0.30 to −0.60 downward
+            float dsz    = 1.0f + (float)(RngDouble(ref r) * 0.8);  // 1.0–1.8, allows branching
+            CaveWorm(raw, chunkX, chunkZ, ref r, x, y, z,
+                dsz, dyaw, dpitch, 0, 0, 1.0, (int)y + 5);
         }
     }
 
+    // pitchDecay: 0–1 overrides the random 0.7/0.92 choice. Pass -1 for default behavior.
     static void CaveWorm(short[,,] raw, int chunkX, int chunkZ, ref ulong r,
         double x, double y, double z,
         float size, float yaw, float pitch,
-        int step, int length, double vertScale)
+        int step, int length, double vertScale, int yCeiling, float pitchDecay = -1f)
     {
         double cx = chunkX * 16 + 8.0;
         double cz = chunkZ * 16 + 8.0;
@@ -736,8 +787,9 @@ public static class AlphaTerrainGen
         }
         if (step == -1) { step = length / 2; roomMode = true; }
 
-        int branchAt    = RngInt(ref r, length / 2) + length / 4;
-        bool gentlePitch = RngInt(ref r, 6) == 0;
+        int branchAt     = RngInt(ref r, length / 2) + length / 4;
+        bool gentlePitch = pitchDecay >= 0f ? true : RngInt(ref r, 6) == 0;
+        float actualDecay = pitchDecay >= 0f ? pitchDecay : (gentlePitch ? 0.92f : 0.7f);
 
         for (; step < length; step++)
         {
@@ -749,7 +801,7 @@ public static class AlphaTerrainGen
             y += Math.Sin(pitch);
             z += Math.Sin(yaw) * cosP;
 
-            pitch *= gentlePitch ? 0.92f : 0.7f;
+            pitch *= actualDecay;
             pitch += dPitch * 0.1f;
             yaw   += dYaw   * 0.1f;
             dPitch *= 0.9f;
@@ -762,10 +814,10 @@ public static class AlphaTerrainGen
             {
                 CaveWorm(raw, chunkX, chunkZ, ref r, x, y, z,
                     (float)RngDouble(ref r) * 0.5f + 0.5f,
-                    yaw - (float)(Math.PI * 0.5), pitch / 3f, step, length, 1.0);
+                    yaw - (float)(Math.PI * 0.5), pitch / 3f, step, length, 1.0, yCeiling);
                 CaveWorm(raw, chunkX, chunkZ, ref r, x, y, z,
                     (float)RngDouble(ref r) * 0.5f + 0.5f,
-                    yaw + (float)(Math.PI * 0.5), pitch / 3f, step, length, 1.0);
+                    yaw + (float)(Math.PI * 0.5), pitch / 3f, step, length, 1.0, yCeiling);
                 return;
             }
 
@@ -781,8 +833,8 @@ public static class AlphaTerrainGen
 
             int x0 = Math.Max((int)(x - hw) - chunkX * 16 - 1, 0);
             int x1 = Math.Min((int)(x + hw) - chunkX * 16 + 2, 16);
-            int y0 = Math.Max((int)(y - hh) - 1, 1);
-            int y1 = Math.Min((int)(y + hh) + 2, SEA_LEVEL - 5);
+            int y0 = Math.Max((int)(y - hh) - 1, 6);
+            int y1 = Math.Min((int)(y + hh) + 2, yCeiling);
             int z0 = Math.Max((int)(z - hw) - chunkZ * 16 - 1, 0);
             int z1 = Math.Min((int)(z + hw) - chunkZ * 16 + 2, 16);
 
@@ -985,10 +1037,10 @@ public static class AlphaTerrainGen
 
         ReplaceSurface(raw, chunkX, chunkZ, temp, humi, westMap, eastMap, southMap, northMap);
         BeachSlope(raw);
-        FixExposedDirt(raw);
         FixWaterlineStone(raw);
         FillWater(raw);
-        CarveCaves(raw, chunkX, chunkZ, seed);
+        GenerateCaves(raw, chunkX, chunkZ, seed);
+        FixExposedDirt(raw);
         PlaceSeafloor(raw, chunkX, chunkZ, seed);
         PlaceBedrock(raw, chunkX, chunkZ, seed);
         PlaceOres(raw, chunkX, chunkZ, seed, oreNodes);

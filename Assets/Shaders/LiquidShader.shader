@@ -89,7 +89,10 @@ Shader "Custom/LiquidShader"
                 float3 posOS = IN.positionOS.xyz;
                 float3 posWS = TransformObjectToWorld(posOS);
 
-                // Wave — R channel encodes wave eligibility per vertex
+                // Wave — R channel encodes wave eligibility per vertex.
+                // Base offset lowers the top face so waves always stay below the block
+                // top (y+1), preventing the gap between the waving top and pinned sides.
+                posOS.y -= 0.1 * IN.color.r;
                 float wave = sin(_Time.y * _WaveSpeed + posWS.x * _WaveFreq + posWS.z * _WaveFreq) * _WaveHeight;
                 posOS.y   += wave * IN.color.r;
 

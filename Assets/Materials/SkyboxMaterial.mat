@@ -25,8 +25,8 @@ Material:
     m_TexEnvs: []
     m_Ints: []
     m_Floats:
-    - _GroundBlend: 6
-    - _HorizonSharpness: 2.5
+    - _GroundBlend: 2.5
+    - _HorizonSharpness: 0.75
     m_Colors:
     - _GroundColor: {r: 0.05, g: 0.05, b: 0.05, a: 1}
     - _HorizonColor: {r: 0.6, g: 0.8, b: 1, a: 1}
