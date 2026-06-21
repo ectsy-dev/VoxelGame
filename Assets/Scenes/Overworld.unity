@@ -535,11 +535,15 @@ MonoBehaviour:
   seedOffSet: 0
   oreConfig: {fileID: 11400000, guid: 0a8befd9238f2374585bb9cd3ceae2a4, type: 2}
   atlasMaterial: {fileID: 2100000, guid: f0ea28dfee45db74daf513ff5d4b2050, type: 2}
+  liquidMaterial: {fileID: 2100000, guid: 7daf2fe2f8df1b94a9b6aac0d71a729a, type: 2}
   transparentAtlasMaterial: {fileID: 2100000, guid: dfc5fdada3d659a4da7bbdf88fd282f7, type: 2}
+  dayLightmap: {fileID: 2800000, guid: 58af435fdad626a4a9535017d296d0ff, type: 3}
+  nightLightmap: {fileID: 2800000, guid: fa939ed4542cd5342a17df9447df2f86, type: 3}
   blockTypes:
   - blockName: Air
     isSolid: 0
     isTransparent: 0
+    isLiquid: 0
     backFaceTexture: 0
     frontFaceTexture: 0
     topFaceTexture: 0
@@ -549,6 +553,7 @@ MonoBehaviour:
   - blockName: Bedrock
     isSolid: 1
     isTransparent: 0
+    isLiquid: 0
     backFaceTexture: 0
     frontFaceTexture: 0
     topFaceTexture: 0
@@ -558,6 +563,7 @@ MonoBehaviour:
   - blockName: Grass
     isSolid: 1
     isTransparent: 0
+    isLiquid: 0
     backFaceTexture: 2
     frontFaceTexture: 2
     topFaceTexture: 3
@@ -567,6 +573,7 @@ MonoBehaviour:
   - blockName: Dirt
     isSolid: 1
     isTransparent: 0
+    isLiquid: 0
     backFaceTexture: 4
     frontFaceTexture: 4
     topFaceTexture: 4
@@ -576,6 +583,7 @@ MonoBehaviour:
   - blockName: Stone
     isSolid: 1
     isTransparent: 0
+    isLiquid: 0
     backFaceTexture: 5
     frontFaceTexture: 5
     topFaceTexture: 5
@@ -585,6 +593,7 @@ MonoBehaviour:
   - blockName: Water
     isSolid: 0
     isTransparent: 1
+    isLiquid: 1
     backFaceTexture: 1
     frontFaceTexture: 1
     topFaceTexture: 1
@@ -594,6 +603,7 @@ MonoBehaviour:
   - blockName: Sand
     isSolid: 1
     isTransparent: 0
+    isLiquid: 0
     backFaceTexture: 32
     frontFaceTexture: 32
     topFaceTexture: 32
@@ -603,6 +613,7 @@ MonoBehaviour:
   - blockName: Gravel
     isSolid: 1
     isTransparent: 0
+    isLiquid: 0
     backFaceTexture: 33
     frontFaceTexture: 33
     topFaceTexture: 33
@@ -612,6 +623,7 @@ MonoBehaviour:
   - blockName: Cobblestone
     isSolid: 1
     isTransparent: 0
+    isLiquid: 0
     backFaceTexture: 6
     frontFaceTexture: 6
     topFaceTexture: 6
@@ -621,6 +633,7 @@ MonoBehaviour:
   - blockName: Mossy Cobblestone
     isSolid: 1
     isTransparent: 0
+    isLiquid: 0
     backFaceTexture: 7
     frontFaceTexture: 7
     topFaceTexture: 7
@@ -630,6 +643,7 @@ MonoBehaviour:
   - blockName: Log
     isSolid: 1
     isTransparent: 0
+    isLiquid: 0
     backFaceTexture: 8
     frontFaceTexture: 8
     topFaceTexture: 9
@@ -639,6 +653,7 @@ MonoBehaviour:
   - blockName: Oak Lumber
     isSolid: 1
     isTransparent: 0
+    isLiquid: 0
     backFaceTexture: 10
     frontFaceTexture: 10
     topFaceTexture: 10
@@ -648,6 +663,7 @@ MonoBehaviour:
   - blockName: Plank
     isSolid: 1
     isTransparent: 0
+    isLiquid: 0
     backFaceTexture: 11
     frontFaceTexture: 11
     topFaceTexture: 11
@@ -657,6 +673,7 @@ MonoBehaviour:
   - blockName: Glass
     isSolid: 1
     isTransparent: 1
+    isLiquid: 0
     backFaceTexture: 12
     frontFaceTexture: 12
     topFaceTexture: 12
@@ -666,6 +683,7 @@ MonoBehaviour:
   - blockName: Obisdian
     isSolid: 1
     isTransparent: 0
+    isLiquid: 0
     backFaceTexture: 13
     frontFaceTexture: 13
     topFaceTexture: 13
@@ -675,6 +693,7 @@ MonoBehaviour:
   - blockName: Brick
     isSolid: 1
     isTransparent: 0
+    isLiquid: 0
     backFaceTexture: 14
     frontFaceTexture: 14
     topFaceTexture: 14
@@ -684,6 +703,7 @@ MonoBehaviour:
   - blockName: Ice
     isSolid: 1
     isTransparent: 1
+    isLiquid: 0
     backFaceTexture: 15
     frontFaceTexture: 15
     topFaceTexture: 15
