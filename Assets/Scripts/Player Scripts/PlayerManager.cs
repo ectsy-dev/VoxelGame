@@ -1,4 +1,5 @@
 using UnityEngine;
+using UnityEngine.InputSystem;
 
 public class PlayerManager : MonoBehaviour
 {
@@ -7,6 +8,7 @@ public class PlayerManager : MonoBehaviour
     [SerializeField] private PlayerCamera playerCamera;
 
     private PlayerInputActions inputActions;
+    private World world;
 
     private void Start()
     {
@@ -15,6 +17,8 @@ public class PlayerManager : MonoBehaviour
 
         inputActions = new PlayerInputActions();
         inputActions.Enable();
+
+        world = Object.FindFirstObjectByType<World>();
 
         playerController.Initialize();
 
@@ -53,9 +57,11 @@ public class PlayerManager : MonoBehaviour
         var characterInput = new CharacterInput
         {
 
-            Move = input.Move.ReadValue<Vector2>(),
-            Rotation = playerCamera.transform.rotation,
-            Jump = input.Jump.IsPressed()
+            Move      = input.Move.ReadValue<Vector2>(),
+            Rotation  = playerCamera.transform.rotation,
+            Jump      = input.Jump.IsPressed(),
+            FlyToggle = input.FlyToggle.WasPressedThisFrame(),
+            FlyDown   = input.FlyDown.IsPressed()
 
         };
 

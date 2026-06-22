@@ -298,6 +298,38 @@ public static class AlphaTerrainGen
     static Noises _noises;
     static int _noiseSeed = int.MinValue;
 
+    // Per-thread scratch buffers — allocated once per thread on first use, reused every call.
+    // All terrain gen calls on a single thread are strictly sequential so sharing is safe.
+    [ThreadStatic] static double[] _tsTemp;
+    [ThreadStatic] static double[] _tsHumi;
+    [ThreadStatic] static double[] _tsPreci;
+    [ThreadStatic] static double[] _tsSandN;
+    [ThreadStatic] static double[] _tsGravN;
+    [ThreadStatic] static double[] _tsElevN;
+    [ThreadStatic] static double[] _tsJitterN;
+    [ThreadStatic] static bool[]   _tsNearWater;
+    [ThreadStatic] static double[] _tsScaleN;
+    [ThreadStatic] static double[] _tsDepthN;
+    [ThreadStatic] static double[] _tsMainN;
+    [ThreadStatic] static double[] _tsMinN;
+    [ThreadStatic] static double[] _tsMaxN;
+    [ThreadStatic] static double[] _tsGrid;
+
+    static double[] TsTemp      => _tsTemp      ?? (_tsTemp      = new double[256]);
+    static double[] TsHumi      => _tsHumi      ?? (_tsHumi      = new double[256]);
+    static double[] TsPreci     => _tsPreci     ?? (_tsPreci     = new double[256]);
+    static double[] TsSandN     => _tsSandN     ?? (_tsSandN     = new double[256]);
+    static double[] TsGravN     => _tsGravN     ?? (_tsGravN     = new double[256]);
+    static double[] TsElevN     => _tsElevN     ?? (_tsElevN     = new double[256]);
+    static double[] TsJitterN   => _tsJitterN   ?? (_tsJitterN   = new double[256]);
+    static bool[]   TsNearWater => _tsNearWater ?? (_tsNearWater = new bool[256]);
+    static double[] TsScaleN    => _tsScaleN    ?? (_tsScaleN    = new double[25]);
+    static double[] TsDepthN    => _tsDepthN    ?? (_tsDepthN    = new double[25]);
+    static double[] TsMainN     => _tsMainN     ?? (_tsMainN     = new double[425]);
+    static double[] TsMinN      => _tsMinN      ?? (_tsMinN      = new double[425]);
+    static double[] TsMaxN      => _tsMaxN      ?? (_tsMaxN      = new double[425]);
+    static double[] TsGrid      => _tsGrid      ?? (_tsGrid      = new double[425]);
+
     static void EnsureNoises(int seed)
     {
         if (seed == _noiseSeed) return;
@@ -326,9 +358,9 @@ public static class AlphaTerrainGen
 
     static void GetBiomeMaps(int blockX, int blockZ, out double[] temp, out double[] humi)
     {
-        temp  = new double[256];
-        humi  = new double[256];
-        var preci = new double[256];
+        temp  = TsTemp;
+        humi  = TsHumi;
+        var preci = TsPreci;
         GenSimplex(temp,  blockX, blockZ, 16, 16, 0.025, 0.025, 0.25,          _noises.temperature);
         GenSimplex(humi,  blockX, blockZ, 16, 16, 0.050, 0.050, 1.0 / 3.0,    _noises.humidity);
         GenSimplex(preci, blockX, blockZ, 16, 16, 0.25,  0.25,  0.58823529411, _noises.precipitation);
@@ -351,14 +383,14 @@ public static class AlphaTerrainGen
     {
         const double D = 684.412;
 
-        var scaleN = new double[25];
-        var depthN = new double[25];
+        var scaleN = TsScaleN;
+        var depthN = TsDepthN;
         GenNoise2D(scaleN, chunkX, chunkZ, 5, 5, 1.121, 1.121, _noises.scale);
         GenNoise2D(depthN, chunkX, chunkZ, 5, 5, 200.0, 200.0, _noises.depth);
 
-        var mainN = new double[425];
-        var minN  = new double[425];
-        var maxN  = new double[425];
+        var mainN = TsMainN;
+        var minN  = TsMinN;
+        var maxN  = TsMaxN;
         GenNoise3D(mainN, chunkX, 0, chunkZ, 5, 17, 5, D/80, D/160, D/80, _noises.mainLimit);
         GenNoise3D(minN,  chunkX, 0, chunkZ, 5, 17, 5, D,    D,     D,    _noises.minLimit);
         GenNoise3D(maxN,  chunkX, 0, chunkZ, 5, 17, 5, D,    D,     D,    _noises.maxLimit);
@@ -464,9 +496,9 @@ public static class AlphaTerrainGen
         const double nf = 0.03125;
         ulong rng = RngInit(unchecked((ulong)((long)chunkX * 0x4f9939f508L + (long)chunkZ * 0x1ef1565bd5L)));
 
-        var sandN = new double[256];
-        var gravN = new double[256];
-        var elevN = new double[256];
+        var sandN = TsSandN;
+        var gravN = TsGravN;
+        var elevN = TsElevN;
         GenNoise3D(sandN, chunkX * 16, 0, chunkZ * 16, 16, 1, 16, nf,    nf,    1.0,  _noises.shoreComp);
         GenNoise2D(gravN, chunkZ * 16, chunkX * 16,    16, 16, nf, nf,          _noises.shoreComp);
         GenNoise3D(elevN, chunkX * 16, 0, chunkZ * 16, 16, 1, 16, nf*2,  nf*2,  nf*2, _noises.surfElev);
@@ -475,7 +507,7 @@ public static class AlphaTerrainGen
         // (raw y=64 == AIR means terrain is below sea level). Read before the loop
         // modifies raw so the proximity map is based on unmodified terrain.
         const int beachRadius = 4;
-        var nearWater = new bool[256];
+        var nearWater = TsNearWater;
         for (int x = 0; x < 16; x++)
         for (int z = 0; z < 16; z++)
         {
@@ -994,7 +1026,7 @@ public static class AlphaTerrainGen
     // Must run after FillWater so water presence can be detected.
     static void PlaceSeafloor(short[,,] raw, int chunkX, int chunkZ, int seed)
     {
-        var jitterN = new double[256];
+        var jitterN = TsJitterN;
         GenNoise2D(jitterN, chunkX * 16, chunkZ * 16, 16, 16, 0.015, 0.015, _noises.shoreComp);
 
         const double transWidth = 1.0;
@@ -1092,7 +1124,7 @@ public static class AlphaTerrainGen
 
         GetBiomeMaps(chunkX * 16, chunkZ * 16, out double[] temp, out double[] humi);
 
-        var grid = new double[425]; // 5*17*5
+        var grid = TsGrid;
         FillDensityGrid(grid, chunkX * 4, chunkZ * 4, temp, humi);
         BuildTerrain(raw, grid);
 
@@ -1116,7 +1148,7 @@ public static class AlphaTerrainGen
     {
         EnsureNoises(seed);
         GetBiomeMaps(chunkX * 16, chunkZ * 16, out double[] temp, out double[] humi);
-        var grid = new double[425];
+        var grid = TsGrid;
         FillDensityGrid(grid, chunkX * 4, chunkZ * 4, temp, humi);
         var raw = new short[16, WORLD_HEIGHT, 16];
         BuildTerrain(raw, grid);

@@ -49,7 +49,7 @@ public class World : MonoBehaviour
     // Chunks waiting to be created — drained gradually in Update() to avoid a one-frame spike
     Queue<Vector2Int> pendingCreations = new Queue<Vector2Int>();
     HashSet<Vector2Int> pendingSet     = new HashSet<Vector2Int>();
-    const int chunkCreationsPerFrame   = 8;
+    const int chunkCreationsPerFrame   = 3;
 
     // Chunks that need to rebuild their mesh because a newly-loaded neighbor
     // provided better border sky light values after their initial build.
@@ -304,6 +304,35 @@ public class World : MonoBehaviour
 
         var data = GetOrGenerateChunkData(chunkX, chunkZ);
         return data[lx, y, lz];
+    }
+
+    public void PlaceVoxel(Vector3 worldPos, short blockId)
+    {
+        int xi = Mathf.FloorToInt(worldPos.x);
+        int yi = Mathf.FloorToInt(worldPos.y);
+        int zi = Mathf.FloorToInt(worldPos.z);
+
+        if (yi < 0 || yi >= VoxelData.chunkHeight) return;
+
+        int chunkX = Mathf.FloorToInt(worldPos.x / (int)VoxelData.chunkWidth);
+        int chunkZ = Mathf.FloorToInt(worldPos.z / (int)VoxelData.chunkWidth);
+        int lx = xi - chunkX * (int)VoxelData.chunkWidth;
+        int lz = zi - chunkZ * (int)VoxelData.chunkWidth;
+
+        var key = new Vector2Int(chunkX, chunkZ);
+
+        if (genCache.TryGetValue(key, out short[,,] raw))
+            raw[lx, yi, lz] = blockId;
+
+        if (chunks.TryGetValue(key, out Chunk chunk) && chunk.isDataReady)
+        {
+            chunk.voxelMap[lx, yi, lz] = blockId;
+            if (!remeshSet.Contains(key))
+            {
+                remeshQueue.Enqueue(key);
+                remeshSet.Add(key);
+            }
+        }
     }
 
     void DirtyNeighbors(ChunkCoord coord)

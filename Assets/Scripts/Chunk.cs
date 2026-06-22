@@ -1,6 +1,9 @@
 using System;
 using System.Collections.Generic;
+using System.Runtime.InteropServices;
+using Unity.Collections;
 using UnityEngine;
+using UnityEngine.Rendering;
 
 public class Chunk
 {
@@ -87,6 +90,20 @@ public class Chunk
 
     public short[,,] voxelMap = new short[VoxelData.chunkWidth, VoxelData.chunkHeight, VoxelData.chunkWidth];
 
+    [ThreadStatic] static Queue<Vector3Int> _bfsQueue;
+    static Queue<Vector3Int> BfsQueue { get { return _bfsQueue ?? (_bfsQueue = new Queue<Vector3Int>(4096)); } }
+
+    // Interleaved vertex layout written into native mesh buffers on the background thread.
+    [StructLayout(LayoutKind.Sequential)]
+    struct MeshVertex
+    {
+        public Vector3 position;
+        public Vector3 normal;
+        public Color   color;
+        public Vector2 uv;
+    }
+
+
     Vector3 chunkPosition;
 
     public volatile bool isDataReady   = false;
@@ -139,6 +156,7 @@ public class Chunk
 
         ComputeSkyLight();
         CreateChunkData();
+        PrepareMeshData();
         isMeshPending = true;
         isDataReady = true;
     }
@@ -160,6 +178,7 @@ public class Chunk
         transVerts.Clear();  transTris.Clear();  transUvs.Clear(); transNorms.Clear();
         opaqueColors.Clear(); liqColors.Clear(); transColors.Clear();
         CreateChunkData();
+        PrepareMeshData();
     }
 
     public void PopulateVoxelMap()
@@ -199,7 +218,8 @@ public class Chunk
         var sl    = ComputeSkyLightStatic(data, blockTypes);
         int w     = (int)VoxelData.chunkWidth;
         int h     = (int)VoxelData.chunkHeight;
-        var queue = new Queue<Vector3Int>();
+        var queue = BfsQueue;
+        queue.Clear();
 
         SeedBorder(sl, data, blockTypes, new Vector2Int(cx - 1, cz), w - 1, true,  0,     queue);
         SeedBorder(sl, data, blockTypes, new Vector2Int(cx + 1, cz), 0,     true,  w - 1, queue);
@@ -265,7 +285,8 @@ public class Chunk
         int w = (int)VoxelData.chunkWidth;
         int h = (int)VoxelData.chunkHeight;
         var sl    = new byte[w, h, w];
-        var queue = new Queue<Vector3Int>();
+        var queue = BfsQueue;
+        queue.Clear();
 
         for (int x = 0; x < w; x++)
         for (int z = 0; z < w; z++)
@@ -558,62 +579,71 @@ public class Chunk
         }
     }
 
-    public void CreateMesh()
+    // Runs on background thread. Merges submesh buffers and pre-offsets indices so
+    // CreateMesh() on the main thread only needs to do the native buffer write and API calls.
+    void PrepareMeshData()
     {
         int opaqueCount = vertices.Count;
-        int liquidCount = liqVerts.Count;
-        int transCount  = transVerts.Count;
 
-        // Offset liquid triangle indices and merge into main vertex list
-        for (int i = 0; i < liqTris.Count; i++)
-            liqTris[i] += opaqueCount;
-        vertices.AddRange(liqVerts);
-        uvs.AddRange(liqUvs);
-        normals.AddRange(liqNorms);
+        for (int i = 0; i < liqTris.Count; i++) liqTris[i] += opaqueCount;
+        vertices.AddRange(liqVerts); uvs.AddRange(liqUvs); normals.AddRange(liqNorms);
+        liqVerts.Clear(); liqUvs.Clear(); liqNorms.Clear();
 
-        // Offset other-transparent triangle indices and merge
         int baseAfterLiquid = vertices.Count;
-        for (int i = 0; i < transTris.Count; i++)
-            transTris[i] += baseAfterLiquid;
-        vertices.AddRange(transVerts);
-        uvs.AddRange(transUvs);
-        normals.AddRange(transNorms);
+        for (int i = 0; i < transTris.Count; i++) transTris[i] += baseAfterLiquid;
+        vertices.AddRange(transVerts); uvs.AddRange(transUvs); normals.AddRange(transNorms);
+        transVerts.Clear(); transUvs.Clear(); transNorms.Clear();
 
-        // Merged color buffer: alpha = face brightness, liquid R = wave weight
-        var colors = new List<Color>(opaqueCount + liquidCount + transCount);
-        colors.AddRange(opaqueColors);
-        colors.AddRange(liqColors);
-        colors.AddRange(transColors);
+        opaqueColors.AddRange(liqColors); opaqueColors.AddRange(transColors);
+        liqColors.Clear(); transColors.Clear();
+    }
 
-        Mesh mesh = new Mesh();
-        mesh.indexFormat = UnityEngine.Rendering.IndexFormat.UInt32;
-        mesh.SetVertices(vertices);
-        mesh.SetUVs(0, uvs);
-        mesh.SetNormals(normals);
-        mesh.SetColors(colors);
-        mesh.subMeshCount = 3;
-        mesh.SetTriangles(triangles, 0);
-        mesh.SetTriangles(liqTris,   1);
-        mesh.SetTriangles(transTris, 2);
+    // Runs on main thread. Writes pre-merged list data into a single interleaved native
+    // buffer in one pass — faster than six separate mesh.Set* calls.
+    public void CreateMesh()
+    {
+        int totalVerts   = vertices.Count;
+        int triCount0    = triangles.Count;
+        int triCount1    = liqTris.Count;
+        int triCount2    = transTris.Count;
+        int totalIndices = triCount0 + triCount1 + triCount2;
+
+        var mda = Mesh.AllocateWritableMeshData(1);
+        var md  = mda[0];
+
+        md.SetVertexBufferParams(totalVerts,
+            new VertexAttributeDescriptor(VertexAttribute.Position,  VertexAttributeFormat.Float32, 3),
+            new VertexAttributeDescriptor(VertexAttribute.Normal,    VertexAttributeFormat.Float32, 3),
+            new VertexAttributeDescriptor(VertexAttribute.Color,     VertexAttributeFormat.Float32, 4),
+            new VertexAttributeDescriptor(VertexAttribute.TexCoord0, VertexAttributeFormat.Float32, 2));
+        md.SetIndexBufferParams(totalIndices, IndexFormat.UInt32);
+
+        var vBuf = md.GetVertexData<MeshVertex>();
+        for (int i = 0; i < totalVerts; i++)
+            vBuf[i] = new MeshVertex { position = vertices[i], normal = normals[i], uv = uvs[i], color = opaqueColors[i] };
+
+        var iBuf = md.GetIndexData<uint>();
+        int t = 0;
+        for (int i = 0; i < triCount0; i++) iBuf[t++] = (uint)triangles[i];
+        for (int i = 0; i < triCount1; i++) iBuf[t++] = (uint)liqTris[i];
+        for (int i = 0; i < triCount2; i++) iBuf[t++] = (uint)transTris[i];
+
+        md.subMeshCount = 3;
+        md.SetSubMesh(0, new SubMeshDescriptor(0,                     triCount0), MeshUpdateFlags.DontRecalculateBounds);
+        md.SetSubMesh(1, new SubMeshDescriptor(triCount0,             triCount1), MeshUpdateFlags.DontRecalculateBounds);
+        md.SetSubMesh(2, new SubMeshDescriptor(triCount0 + triCount1, triCount2), MeshUpdateFlags.DontRecalculateBounds);
+
+        var mesh = new Mesh();
+        Mesh.ApplyAndDisposeWritableMeshData(mda, mesh,
+            MeshUpdateFlags.DontValidateIndices |
+            MeshUpdateFlags.DontNotifyMeshUsers |
+            MeshUpdateFlags.DontRecalculateBounds);
+        mesh.bounds = new Bounds(new Vector3(8f, 128f, 8f), new Vector3(16f, 256f, 16f));
         meshFilter.mesh = mesh;
         skyLightMap = null;
 
-        // Free CPU-side lists — mesh data is now on the GPU
-        vertices.Clear();   vertices.TrimExcess();
-        uvs.Clear();        uvs.TrimExcess();
-        normals.Clear();    normals.TrimExcess();
-        triangles.Clear();  triangles.TrimExcess();
-        liqVerts.Clear();   liqVerts.TrimExcess();
-        liqUvs.Clear();     liqUvs.TrimExcess();
-        liqNorms.Clear();   liqNorms.TrimExcess();
-        liqTris.Clear();    liqTris.TrimExcess();
-        liqColors.Clear();    liqColors.TrimExcess();
-        opaqueColors.Clear(); opaqueColors.TrimExcess();
-        transColors.Clear();  transColors.TrimExcess();
-        transVerts.Clear(); transVerts.TrimExcess();
-        transUvs.Clear();   transUvs.TrimExcess();
-        transNorms.Clear(); transNorms.TrimExcess();
-        transTris.Clear();  transTris.TrimExcess();
+        vertices.Clear(); uvs.Clear(); normals.Clear(); opaqueColors.Clear();
+        triangles.Clear(); liqTris.Clear(); transTris.Clear();
     }
 
     public void AddTexture(int textureID, List<Vector2> targetUvs)

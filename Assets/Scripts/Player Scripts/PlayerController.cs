@@ -8,6 +8,8 @@ public struct CharacterInput
     public Vector2 Move;
     public Quaternion Rotation;
     public bool Jump;
+    public bool FlyToggle;
+    public bool FlyDown;
 
 }
 
@@ -57,7 +59,7 @@ public class PlayerController : MonoBehaviour
         // Cap to 50ms so chunk-generation frame spikes don't cause tunneling
         float dt = Mathf.Min(Time.deltaTime, 0.05f);
 
-        if (UnityEngine.Input.GetKeyDown(KeyCode.F))
+        if (input.FlyToggle)
         {
             isFlying = !isFlying;
             velocity = Vector3.zero;
@@ -68,7 +70,7 @@ public class PlayerController : MonoBehaviour
             float flySpeed = moveSpeed * 4f;
             float flyVertical = 0f;
             if (input.Jump) flyVertical = flySpeed;
-            if (UnityEngine.Input.GetKey(KeyCode.LeftControl)) flyVertical = -flySpeed;
+            if (input.FlyDown) flyVertical = -flySpeed;
 
             moveDirection = transform.forward * input.Move.y + transform.right * input.Move.x;
             moveDirection.Normalize();

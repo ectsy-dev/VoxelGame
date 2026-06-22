@@ -9,12 +9,12 @@ Shader "Custom/LiquidShader"
         [Space]
         _Alpha            ("Alpha",            Range(0,1)) = 0.75
         [Space]
-        _ScrollSpeedX     ("Scroll Speed X",   Float)      = 0.05
-        _ScrollSpeedY     ("Scroll Speed Y",   Float)      = 0.02
+        _ScrollSpeedX     ("Scroll Speed X",   Float)      = 0.08
+        _ScrollSpeedY     ("Scroll Speed Y",   Float)      = 0.05
         [Space]
-        _WaveHeight       ("Wave Height",      Float)      = 0.025
-        _WaveSpeed        ("Wave Speed",       Float)      = 1.5
-        _WaveFreq         ("Wave Frequency",   Float)      = 0.5
+        _WaveHeight       ("Wave Height",      Float)      = 0.08
+        _WaveSpeed        ("Wave Speed",       Float)      = 2.0
+        _WaveFreq         ("Wave Frequency",   Float)      = 1.0
         [Space]
         [HDR] _EmissionColor    ("Emission Color",   Color)      = (0, 0, 0, 0)
         _EmissionStrength ("Emission Strength", Float)     = 0.0
@@ -89,12 +89,13 @@ Shader "Custom/LiquidShader"
                 float3 posOS = IN.positionOS.xyz;
                 float3 posWS = TransformObjectToWorld(posOS);
 
-                // Wave — R channel encodes wave eligibility per vertex.
-                // Base offset lowers the top face so waves always stay below the block
-                // top (y+1), preventing the gap between the waving top and pinned sides.
-                posOS.y -= 0.1 * IN.color.r;
+                // Wave — applied to every vertex at the top of the block (y≈1), including
+                // the top edges of side faces, so they stay connected to the waving top face.
+                // Bottom face vertices (y=0) are unaffected.
+                float isTopVertex = step(0.5, posOS.y);
+                posOS.y -= 0.1 * isTopVertex;
                 float wave = sin(_Time.y * _WaveSpeed + posWS.x * _WaveFreq + posWS.z * _WaveFreq) * _WaveHeight;
-                posOS.y   += wave * IN.color.r;
+                posOS.y   += wave * isTopVertex;
 
                 VertexPositionInputs pos = GetVertexPositionInputs(posOS);
                 OUT.positionCS = pos.positionCS;
